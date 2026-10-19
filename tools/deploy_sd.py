@@ -1,6 +1,7 @@
 """TF 卡一键部署工具。
 
-把 toSD 里的图片、音频和 TEXT.BIN 转成板卡可读格式，写入 SD 卡并回写扫描常量。
+把 toSD 里的图片、音频、advertisement.txt 和 .lrc 转成板卡可读格式，
+写入 SD 卡并回写扫描常量。
 
 用法:
     python deploy_sd.py --list
@@ -18,6 +19,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import textwrap
 from ctypes import wintypes
 
 try:
@@ -1477,10 +1479,194 @@ def deploy_main(argv=None):
     return 0 if ok else 1
 
 
+# 文本打包
+
+TEXT_MAGIC = b"FTXT"
+TEXT_VERSION = 1
+TEXT_CUE_N = 64
+TEXT_SCH_N = 1024
+TEXT_LN_N = 64
+TEXT_ACH_N = 1024
+TEXT_OFF_CUE = 16
+TEXT_OFF_SCH = TEXT_OFF_CUE + 512
+TEXT_OFF_LN = TEXT_OFF_SCH + 1024
+TEXT_OFF_ACH = TEXT_OFF_LN + 128
+TEXT_OFF_END = TEXT_OFF_ACH + 1024
+TEXT_RATE = 48000
+TEXT_SAMPLES_PER_FRAME = 792
+TEXT_ASCII_FIRST, TEXT_ASCII_LAST = 0x20, 0x7E
+TEXT_AD_LINES = 4
+TEXT_AD_COLS = 64
+
+# 广告字库收录的字符，顺序必须与 ad_cn_font_lo/hi.mif 一致（索引即字形槽位）
+TEXT_AD_CHARSET = (
+    " 1280x7"
+    "登山客在静谧湖边驻足凝望云雾缭绕的针叶林564晨光柔和中冲浪者踏穿越辽阔大海"
+    "3旧金门桥橙色暮空下映出雄伟剪影阳洒沙滩成排茅草伞与躺椅上透着悠闲假期气息"
+    "晴朗蓝天孤零木屋立黄麦田9茂密冷杉笼罩浓重白里深邃而神秘壮硕狗戴属链项圈"
+    "警觉地守围栏后院黑暗披床单幽缓走发楼梯这间多彩复古厅因梵高名画点缀洋溢艺术温馨"
+)
+
+
+def parse_lrc(path):
+    out = []
+    for raw in open(path, encoding="utf-8-sig", errors="replace"):
+        line = raw.strip()
+        if not line:
+            continue
+        stamps = re.findall(r"\[(\d+):(\d+(?:\.\d+)?)\]", line)
+        if not stamps:
+            continue
+        text = re.sub(r"\[(\d+):(\d+(?:\.\d+)?)\]", "", line).strip()
+        if not text:
+            continue
+        for mm, ss in stamps:
+            out.append((int(mm) * 60 + float(ss), text))
+    out.sort(key=lambda item: item[0])
+    return out
+
+
+def subtitle_tables(lrc_path, wav_info):
+    cues, stream, dropped = [], [], {}
+    for sec, text in parse_lrc(lrc_path):
+        keep = []
+        for ch in text:
+            if TEXT_ASCII_FIRST <= ord(ch) <= TEXT_ASCII_LAST:
+                keep.append(ch)
+            else:
+                dropped[ch] = dropped.get(ch, 0) + 1
+        if not keep:
+            continue
+        frame = int(round(sec * TEXT_RATE)) // TEXT_SAMPLES_PER_FRAME
+        cues.append((frame, len(stream), len(keep)))
+        stream.extend(keep)
+
+    if not cues:
+        raise ValueError("LRC 里没有可显示的句子（字幕字库只支持 ASCII）")
+    if len(cues) > TEXT_CUE_N - 1:
+        raise ValueError(f"句子 {len(cues)} 条，超过上限 {TEXT_CUE_N - 1} 条")
+    if len(stream) > TEXT_SCH_N:
+        raise ValueError(f"字幕字符 {len(stream)} 个，超过上限 {TEXT_SCH_N}")
+    if max(c[0] for c in cues) > 0xFFFF:
+        raise ValueError("时间戳超出可表示范围（约 18 分钟）")
+
+    if wav_info and wav_info.get("block_align"):
+        samples = wav_info["data_size"] // wav_info["block_align"]
+        end = max(0, samples - 1) // TEXT_SAMPLES_PER_FRAME
+    else:
+        end = cues[-1][0] + 300
+    durs = []
+    for i, (frame, _off, _len) in enumerate(cues):
+        nxt = cues[i + 1][0] if i + 1 < len(cues) else end
+        durs.append(max(1, min(nxt - frame, 0xFFFF)))
+
+    chars = "".join(stream)
+    return cues, chars, durs, dropped
+
+
+def parse_ad_lines(path):
+    texts = []
+    for raw in open(path, encoding="utf-8-sig", errors="replace"):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and "x" in parts[1]:
+            texts.append(parts[1] + "\n" + parts[2].replace("|", "\n"))
+        else:
+            texts.append(line.replace("|", "\n"))
+    return texts
+
+
+def wrap_ad(text):
+    lines = []
+    for seg in text.split("\n"):
+        seg = " ".join(seg.split())
+        if not seg:
+            continue
+        lines.extend(textwrap.wrap(seg, width=TEXT_AD_COLS,
+                                   break_long_words=True,
+                                   break_on_hyphens=False))
+    return lines or [""]
+
+
+def ad_tables(ad_path):
+    texts = parse_ad_lines(ad_path)
+    if not texts:
+        raise ValueError("advertisement.txt 里没有有效行")
+    if len(texts) > TEXT_LN_N // TEXT_AD_LINES:
+        raise ValueError(f"广告文案 {len(texts)} 条，最多 "
+                         f"{TEXT_LN_N // TEXT_AD_LINES} 条（每条对应一张图）")
+
+    missing = {}
+    for idx, text in enumerate(texts, 1):
+        for ch in text:
+            if ch != "\n" and ch not in TEXT_AD_CHARSET:
+                missing.setdefault(ch, idx)
+    if missing:
+        chars = " ".join(f"'{c}'" for c in list(missing)[:20])
+        raise ValueError(f"字库没有这些字符：{chars}（首见于第 "
+                         f"{min(missing.values())} 条）")
+
+    entries, stream = [], []
+    for idx, text in enumerate(texts):
+        lines = wrap_ad(text)
+        if len(lines) > TEXT_AD_LINES:
+            raise ValueError(f"第 {idx + 1} 条折行后 {len(lines)} 行，"
+                             f"最多 {TEXT_AD_LINES} 行")
+        for ln in range(TEXT_AD_LINES):
+            if ln < len(lines):
+                entries.append((len(stream), len(lines[ln])))
+                stream.extend(TEXT_AD_CHARSET.index(c) for c in lines[ln])
+            else:
+                entries.append((len(stream), 0))
+
+    if len(stream) > TEXT_ACH_N:
+        raise ValueError(f"广告字符 {len(stream)} 个，超过上限 {TEXT_ACH_N}")
+    for off, ln in entries:
+        if off > 0x3FF or ln > 0x3F:
+            raise ValueError(f"广告行偏移或长度越界（{off}, {ln}）")
+    return entries, stream, texts
+
+
+def build_text_blob(ad_path, lrc_path, wav_info):
+    cues, chars, durs, dropped = ([], "", [], {})
+    entries, stream, texts = ([], [], [])
+    if lrc_path:
+        cues, chars, durs, dropped = subtitle_tables(lrc_path, wav_info)
+    if ad_path:
+        entries, stream, texts = ad_tables(ad_path)
+
+    buf = bytearray(TEXT_OFF_END)
+    buf[0:4] = TEXT_MAGIC
+    buf[4] = TEXT_VERSION
+
+    for i in range(TEXT_CUE_N):
+        pos = TEXT_OFF_CUE + i * 8
+        if i < len(cues):
+            frame, off, ln = cues[i]
+            buf[pos:pos + 8] = struct.pack("<HHHH", frame, off, ln, durs[i])
+        else:
+            buf[pos:pos + 8] = b"\xff" * 8
+
+    buf[TEXT_OFF_SCH:TEXT_OFF_SCH + TEXT_SCH_N] = b"\x20" * TEXT_SCH_N
+    buf[TEXT_OFF_SCH:TEXT_OFF_SCH + len(chars)] = chars.encode("ascii")
+
+    for i in range(TEXT_LN_N):
+        val = (entries[i][1] << 10) | entries[i][0] if i < len(entries) else 0
+        pos = TEXT_OFF_LN + i * 2
+        buf[pos:pos + 2] = struct.pack("<H", val)
+
+    for i, code in enumerate(stream):
+        buf[TEXT_OFF_ACH + i] = code
+
+    note = f"字幕 {len(cues)} 句 / 广告 {len(texts)} 条"
+    return bytes(buf), note, dropped
+
+
 # 一键流程
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-
 
 IMAGE_EXT = {".bmp", ".jpg", ".jpeg", ".png", ".webp", ".gif"}
 AUDIO_EXT = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"}
@@ -1523,6 +1709,7 @@ def bmp_ok(path):
 
 def list_sources(folder):
     images, audios, text = [], [], None
+    ad_path = lrc_path = None
     for name in sorted(os.listdir(folder), key=natural):
         path = os.path.join(folder, name)
         if not os.path.isfile(path):
@@ -1532,9 +1719,14 @@ def list_sources(folder):
             images.append(path)
         elif ext in AUDIO_EXT:
             audios.append(path)
+        elif ext == ".lrc":
+            if lrc_path is None:
+                lrc_path = path
+        elif name.lower() == "advertisement.txt":
+            ad_path = path
         elif name.upper() == "TEXT.BIN":
             text = path
-    return images, audios, text
+    return images, audios, ad_path, lrc_path, text
 
 
 def prepare_images(images, keep_size, fit):
@@ -1740,7 +1932,7 @@ def main():
     if not os.path.isdir(args.dir):
         print(f"[错误] 素材目录不存在: {args.dir}")
         return 2
-    images, audios, text = list_sources(args.dir)
+    images, audios, ad_path, lrc_path, text = list_sources(args.dir)
     if args.num > 0:
         images = images[:args.num]
     if not images:
@@ -1773,11 +1965,36 @@ def main():
 
     if args.no_text:
         print("  文本: 已跳过（无字幕/广告）")
+    elif ad_path or lrc_path:
+        if not ad_path:
+            print("  [!] 未找到 advertisement.txt，只生成字幕")
+        if not lrc_path:
+            print("  [!] 未找到 .lrc，只生成广告文字")
+        wav_path = os.path.join(BUILD, "music.wav")
+        wav_info = None
+        if os.path.isfile(wav_path):
+            try:
+                wav_info = parse_wav(wav_path)
+            except Exception:
+                wav_info = None
+        try:
+            blob, note, dropped = build_text_blob(ad_path, lrc_path, wav_info)
+        except ValueError as exc:
+            print(f"[错误] 无法生成 TEXT.BIN：{exc}")
+            return 2
+        with open(os.path.join(BUILD, "TEXT.BIN"), "wb") as fh:
+            fh.write(blob)
+        sources = " + ".join(os.path.basename(p) for p in (ad_path, lrc_path) if p)
+        print(f"  TEXT.BIN <- {sources}  {len(blob)} 字节  {note}")
+        if dropped:
+            sample = " ".join(repr(c) for c in list(dropped)[:8])
+            print(f"  [!] 字幕丢弃 {sum(dropped.values())} 个非 ASCII 字符：{sample}")
     elif text:
         shutil.copy2(text, os.path.join(BUILD, "TEXT.BIN"))
         print(f"  TEXT.BIN <- {os.path.basename(text)}")
     else:
-        print("  文本: 未找到 TEXT.BIN（无字幕/广告，其余功能正常）")
+        print("  文本: 未提供 advertisement.txt / .lrc / TEXT.BIN"
+              "（无字幕与广告，其余功能正常）")
 
     if not preflight(args.cluster_kb, args.raw, args.no_wipe, args.drive):
         return 2
