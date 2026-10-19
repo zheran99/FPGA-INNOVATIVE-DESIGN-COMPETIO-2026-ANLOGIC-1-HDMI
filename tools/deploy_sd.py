@@ -1570,11 +1570,11 @@ def parse_ad_lines(path):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        parts = line.split(None, 2)
-        if len(parts) == 3 and parts[0].isdigit() and "x" in parts[1]:
-            texts.append(parts[1] + "\n" + parts[2].replace("|", "\n"))
-        else:
-            texts.append(line.replace("|", "\n"))
+        # 序号只是顺序标记；其后整行都是广告内容，分辨率也属于文案
+        body = re.sub(r"^\d{1,3}\s+", "", line)
+        if not body:
+            continue
+        texts.append(body.replace("|", "\n"))
     return texts
 
 
