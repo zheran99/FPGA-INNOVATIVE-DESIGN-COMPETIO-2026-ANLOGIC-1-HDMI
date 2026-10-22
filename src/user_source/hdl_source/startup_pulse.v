@@ -4619,7 +4619,7 @@ module touch_painter(
     input wire [8:0] input_x,input_y,
     input wire [2:0] page,
     input wire enabled,
-    input wire [223:0] values,
+    input wire [247:0] values,
     input wire [7:0] pressed,
     input wire [2:0] cal_step,mode,
     output wire [11:0] font_addr,
@@ -4800,7 +4800,7 @@ module touch_panel #(
     parameter CLK_HZ=50000000
 )(
     input wire clk,rst_n,enabled,
-    input wire [223:0] values,
+    input wire [247:0] values,
     input wire [2:0] mode,
     input wire [1:0] nav_keys,
     output reg valid,
@@ -4869,15 +4869,15 @@ module touch_panel #(
     wire navigation=interactive && (key_event || (input_settled && (touch_prev || touch_next)));
     reg [15:0] revision;
     reg [7:0] selected,draw_selected;
-    reg [223:0] observed_values,draw_values;
+    reg [247:0] observed_values,draw_values;
     reg observed_enabled;
     reg [2:0] observed_mode,draw_mode,observed_cal,observed_page;
 
     reg full_dirty;
     reg [7:0] previous_selected;
-    wire [27:0] changed_values;
+    wire [30:0] changed_values;
     genvar value_index;
-    generate for(value_index=0;value_index<28;value_index=value_index+1) begin: value_changes
+    generate for(value_index=0;value_index<31;value_index=value_index+1) begin: value_changes
         assign changed_values[value_index]=values[value_index*8+:8]!=observed_values[value_index*8+:8];
     end endgenerate
     reg visible_change;
@@ -4885,11 +4885,11 @@ module touch_panel #(
         case(published_page)
         0:visible_change=|changed_values[7:4];
         1:visible_change=|changed_values[9:8];
-        2:visible_change=|changed_values[3:0] || changed_values[27];
+        2:visible_change=|changed_values[3:0];
         3:visible_change=|changed_values[15:10];
         4:visible_change=(|changed_values[20:16]) || changed_values[25];
         5:visible_change=(|changed_values[22:21]) || changed_values[26];
-        default:visible_change=|changed_values[24:23];
+        default:visible_change=|changed_values[24:23] || changed_values[27] || |changed_values[30:28];
         endcase
     end
     wire full_change=enabled!=observed_enabled || cal_step!=observed_cal ||

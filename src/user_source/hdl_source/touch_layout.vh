@@ -17,7 +17,6 @@ if(cy>=9'd0 && cy<9'd44) touch_row=8'd0;
 if(cy>=9'd44 && cy<9'd88) touch_row=8'd1;
 if(cy>=9'd88 && cy<9'd132) touch_row=8'd2;
 if(cy>=9'd132 && cy<9'd176) touch_row=8'd3;
-if(cy>=9'd176 && cy<9'd220) touch_row=8'd27;
 end
 3'd3:begin
 if(cy>=9'd0 && cy<9'd44) touch_row=8'd10;
@@ -43,6 +42,10 @@ end
 3'd6:begin
 if(cy>=9'd0 && cy<9'd44) touch_row=8'd23;
 if(cy>=9'd44 && cy<9'd88) touch_row=8'd24;
+if(cy>=9'd88 && cy<9'd132) touch_row=8'd27;
+if(cy>=9'd132 && cy<9'd176) touch_row=8'd28;
+if(cy>=9'd176 && cy<9'd220) touch_row=8'd29;
+if(cy>=9'd220 && cy<9'd264) touch_row=8'd30;
 end
 default:; endcase end end endfunction
 localparam TOUCH_SLIDER_LEFT=192, TOUCH_SLIDER_RIGHT=448;
@@ -56,6 +59,9 @@ case(id)
 2:begin ticks=((p25<<2)+128)>>8; touch_slider_value=ticks[7:0]<<1; end
 3:begin ticks=((p25<<1)+128)>>8; touch_slider_value=ticks[7:0]<<1; end
 27:begin ticks=((p25<<2)+128)>>8; touch_slider_value=ticks[7:0]; end
+28:begin ticks=((p25<<1)+p25+128)>>8; touch_slider_value=50+(ticks[7:0]<<1); end
+29:begin ticks=((p25<<2)+128)>>8; touch_slider_value=ticks[7:0]<<1; end
+30:begin ticks=((p25<<1)+128)>>8; touch_slider_value=ticks[7:0]<<1; end
 default:begin ticks=0; touch_slider_value=0; end
 endcase end endfunction
 function [8:0] touch_top; input [7:0] id; begin
@@ -70,7 +76,7 @@ touch_top=0; case(id)
 1:touch_top=9'd44;
 2:touch_top=9'd88;
 3:touch_top=9'd132;
-27:touch_top=9'd176;
+27:touch_top=9'd88;
 10:touch_top=9'd0;
 11:touch_top=9'd44;
 12:touch_top=9'd88;
@@ -88,6 +94,9 @@ touch_top=0; case(id)
 26:touch_top=9'd88;
 23:touch_top=9'd0;
 24:touch_top=9'd44;
+28:touch_top=9'd132;
+29:touch_top=9'd176;
+30:touch_top=9'd220;
 default:; endcase end endfunction
 function [2:0] touch_page; input [7:0] id; begin
 touch_page=7; case(id)
@@ -101,7 +110,7 @@ touch_page=7; case(id)
 1:touch_page=3'd2;
 2:touch_page=3'd2;
 3:touch_page=3'd2;
-27:touch_page=3'd2;
+27:touch_page=3'd6;
 10:touch_page=3'd3;
 11:touch_page=3'd3;
 12:touch_page=3'd3;
@@ -119,6 +128,9 @@ touch_page=7; case(id)
 26:touch_page=3'd5;
 23:touch_page=3'd6;
 24:touch_page=3'd6;
+28:touch_page=3'd6;
+29:touch_page=3'd6;
+30:touch_page=3'd6;
 default:; endcase end endfunction
 function [2:0] touch_target; input [7:0] id; begin
 touch_target=7; case(id)
@@ -150,6 +162,9 @@ touch_target=7; case(id)
 26:touch_target=3'd3;
 23:touch_target=3'd5;
 24:touch_target=3'd5;
+28:touch_target=3'd0;
+29:touch_target=3'd0;
+30:touch_target=3'd0;
 default:; endcase end endfunction
 function [3:0] touch_field; input [7:0] id; begin
 touch_field=0; case(id)
@@ -181,6 +196,9 @@ touch_field=0; case(id)
 26:touch_field=4'd2;
 23:touch_field=4'd2;
 24:touch_field=4'd3;
+28:touch_field=4'd7;
+29:touch_field=4'd8;
+30:touch_field=4'd9;
 default:; endcase end endfunction
 function [7:0] touch_min; input [7:0] id; begin
 touch_min=0; case(id)
@@ -212,6 +230,9 @@ touch_min=0; case(id)
 26:touch_min=8'd0;
 23:touch_min=8'd0;
 24:touch_min=8'd0;
+28:touch_min=8'd50;
+29:touch_min=8'd0;
+30:touch_min=8'd0;
 default:; endcase end endfunction
 function [7:0] touch_max; input [7:0] id; begin
 touch_max=0; case(id)
@@ -243,6 +264,9 @@ touch_max=0; case(id)
 26:touch_max=8'd1;
 23:touch_max=8'd0;
 24:touch_max=8'd0;
+28:touch_max=8'd200;
+29:touch_max=8'd200;
+30:touch_max=8'd100;
 default:; endcase end endfunction
 function [7:0] touch_step; input [7:0] id; begin
 touch_step=0; case(id)
@@ -274,6 +298,9 @@ touch_step=0; case(id)
 26:touch_step=8'd0;
 23:touch_step=8'd0;
 24:touch_step=8'd0;
+28:touch_step=8'd2;
+29:touch_step=8'd2;
+30:touch_step=8'd2;
 default:; endcase end endfunction
 function [7:0] touch_label; input [7:0] id; input [4:0] ch;
 begin touch_label=0;
@@ -421,6 +448,23 @@ if(id==8'd27) begin case(ch)
 0:touch_label=8'd100;
 1:touch_label=8'd5;
 2:touch_label=8'd6;
+default:; endcase end
+if(id==8'd28) begin case(ch)
+0:touch_label=8'd100;
+1:touch_label=8'd7;
+2:touch_label=8'd8;
+3:touch_label=8'd6;
+default:; endcase end
+if(id==8'd29) begin case(ch)
+0:touch_label=8'd100;
+1:touch_label=8'd9;
+2:touch_label=8'd10;
+3:touch_label=8'd6;
+default:; endcase end
+if(id==8'd30) begin case(ch)
+0:touch_label=8'd100;
+1:touch_label=8'd4;
+2:touch_label=8'd11;
 default:; endcase end
 end endfunction
 function [7:0] touch_string; input [5:0] id; input [4:0] ch; begin

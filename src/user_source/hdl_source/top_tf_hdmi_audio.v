@@ -796,9 +796,9 @@ touch_control_bus touch_arbiter(.enabled(mode_oh[7]),.uart_busy(t_uart_busy),
     .playback_ready(t_play_gap==0 && !uart_next_lvl && !uart_prev_lvl && !uart_auto_lvl),
     .valid(t_valid),.target(t_target),.ready(t_ready),.base_wr(t_base_wr),
     .sub_wr(t_sub_wr),.ad_wr(t_ad_wr),.spectrum_wr(t_spectrum_wr),.play_wr(t_play_wr));
-wire [223:0] t_values;
+wire [247:0] t_values;
 
-assign t_values={p_irn,
+assign t_values={p_irvol, p_irsat, p_ircon, p_irn,
     {7'd0,p7_visual_on},{6'd0,p6_logo_size},{audio_pause_eff,aud_stat_c2,a_wav_state_code_c2},8'd0,{7'd0,p7_horizontal},{7'd0,p7_wave_on},
     {7'd0,p6_ad_layout},{6'd0,p6_ad_language},{6'd0,p6_ad_bg},{7'd0,p6_ad_on},{6'd0,p6_logo_sel},
     {7'd0,p5_monitor},{7'd0,p5_size},{6'd0,p5_bg},{6'd0,p5_pos},{6'd0,p5_mode},
@@ -873,6 +873,7 @@ assign sd_key_auto = img_ctrl_off_sd2 ? 1'b1 : (~key_held_sd2[1] & ~u_auto_sd2);
 
 wire [7:0]  p_bri, p_con, p_sat, p_vol;
 wire [7:0]  p_irn;          // 没人亮度（红外增益用）
+wire [7:0]  p_ircon, p_irsat, p_irvol;  // 没人对比度/饱和度/音量
 wire [2:0]  p_rot;
 wire [2:0]  p_item;
 wire [15:0] p_val;
@@ -895,6 +896,9 @@ param_reg param_reg_m0 (
     .O_sat          (p_sat),
     .O_vol          (p_vol),
     .O_irn          (p_irn),
+    .O_ircon        (p_ircon),
+    .O_irsat        (p_irsat),
+    .O_irvol        (p_irvol),
     .O_rot          (p_rot),
     .O_tran_type    (p_tran_type),     // 转场类型
     .O_tran_en      (p_tran_en),       // 转场开关
@@ -1202,13 +1206,28 @@ reg [7:0] pb_c1, pb_c2;      // bri 同步（clk video_clk）
 reg [7:0] pc_c1, pc_c2;      // con 同步
 reg [7:0] ps_c1, ps_c2;      // sat 同步
 reg [7:0] pn_c1, pn_c2;      // 没人亮度 同步（clk video_clk，红外增益用）
+reg [7:0] irc_c1, irc_c2;    // 没人对比度 同步
+reg [7:0] irs_c1, irs_c2;    // 没人饱和度 同步
+reg [7:0] irv_c1, irv_c2;    // 没人音量 同步
+reg [1:0] ir_dim_sync;
+
+always @(posedge video_clk or posedge rst_pixel) begin
+    if (rst_pixel) ir_dim_sync <= 2'd0;
+    else           ir_dim_sync <= {ir_dim_sync[0], ir_dim};
+end
 
 always @(posedge video_clk) begin
     pb_c1 <= p_bri;   pb_c2 <= pb_c1;
     pc_c1 <= p_con;   pc_c2 <= pc_c1;
     ps_c1 <= p_sat;   ps_c2 <= ps_c1;
     pn_c1 <= p_irn;   pn_c2 <= pn_c1;
+    irc_c1 <= p_ircon; irc_c2 <= irc_c1;
+    irs_c1 <= p_irsat; irs_c2 <= irs_c1;
+    irv_c1 <= p_irvol; irv_c2 <= irv_c1;
 end
+
+wire [7:0] con_eff = ir_dim_sync[1] ? pc_c2 : irc_c2;   // 有人=对比度，没人=空对比度
+wire [7:0] sat_eff = ir_dim_sync[1] ? ps_c2 : irs_c2;   // 有人=饱和度，没人=空饱和度
 
 wire [23:0] vout_effected;
 wire        de_eff, hs_eff, vs_eff;      // 效果层输出的延迟 6 拍后时序
@@ -1221,8 +1240,8 @@ param_effect param_effect_m0 (
     .I_vs           (vs),
     .I_rgb          (vout_data_raw),     // 来自 video_delay（已 565 解包）
     .I_bri          (pb_c2),             // 已同步到 video_clk 域
-    .I_con          (pc_c2),
-    .I_sat          (ps_c2),
+    .I_con          (con_eff),           // 有人/没人 选择后的对比度
+    .I_sat          (sat_eff),           // 有人/没人 选择后的饱和度
     .O_de           (de_eff),            // 延迟 6 拍后的 de
     .O_hs           (hs_eff),
     .O_vs           (vs_eff),
@@ -1657,9 +1676,12 @@ always @(posedge video_clk or posedge rst_pixel) begin
     end
 end
 
+// 有人/没人 选择音量
+wire [7:0] vol_eff = ir_dim_sync[1] ? pan_vo_c2 : irv_c2;   // 有人=音量，没人=空音量
+
 audio_volume audio_volume_m0 (
     .I_clk(video_clk),.I_rst(rst_pixel),.I_valid(audio_valid),
-    .I_left(audio_left_data),.I_right(audio_right_data),.I_volume(pan_vo_c2),
+    .I_left(audio_left_data),.I_right(audio_right_data),.I_volume(vol_eff),
     .O_valid(volume_valid),.O_left(volume_left),.O_right(volume_right)
 );
 
@@ -1722,13 +1744,7 @@ sync_monitor sync_monitor_m0 (
     .O_rgb          (mon_rgb)
 );
 
-reg [1:0] ir_dim_sync;
-always @(posedge video_clk or posedge rst_pixel) begin
-    if (rst_pixel) ir_dim_sync <= 2'd0;
-    else           ir_dim_sync <= {ir_dim_sync[0], ir_dim};
-end
-
-wire [7:0] ir_gain_sel = ir_dim_sync[1] ? 8'd100 : pn_c2;   // 有人=100%（正常），没人=p_irn（P8 设）
+wire [7:0] ir_gain_sel = ir_dim_sync[1] ? pb_c2 : pn_c2;   // 有人=亮度(p_bri)，没人=空亮度(p_irn)
 wire [8:0] ir_coeff = {ir_gain_sel, 1'b0} + {2'b0, ir_gain_sel[7:1]};   // ×2 + ×0.5 = ×2.5
 
 reg [3:0] ir_c4;

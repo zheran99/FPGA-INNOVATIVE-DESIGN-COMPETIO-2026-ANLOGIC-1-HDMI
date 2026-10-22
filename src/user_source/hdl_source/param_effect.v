@@ -37,7 +37,7 @@ module param_effect (
         end
     end
 
-    wire signed [8:0] bri_off = $signed(bri_o_r) * 9'sd2;
+    wire signed [8:0] bri_off = 9'sd0;
 
     wire [7:0] r_in = I_rgb[23:16];
     wire [7:0] g_in = I_rgb[15:8];

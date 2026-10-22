@@ -22,6 +22,9 @@ module param_reg #(
     output reg  [7:0]  O_sat,           // 饱和度 0..200 默认 100
     output reg  [7:0]  O_vol,           // 音量 0..100 默认 100
     output reg  [7:0]  O_irn,           // 没人亮度 0..100 默认 100（P8 触摸滑块调）
+    output reg  [7:0]  O_ircon,         // 没人对比度 50..200 默认 100
+    output reg  [7:0]  O_irsat,         // 没人饱和度 0..200 默认 100
+    output reg  [7:0]  O_irvol,         // 没人音量 0..100 默认 100
     output reg  [2:0]  O_rot,           // 轮播档位 0..4 默认 ROT_DEFAULT
 
     output reg  [2:0]  O_tran_type,     // 转场类型 0..5（默认 1=交叉淡化）
@@ -46,16 +49,20 @@ module param_reg #(
                ITEM_LAST  = 3'd3;
 
     // 各项边界
-    localparam BRI_MIN = 8'd0,   BRI_MAX = 8'd100, BRI_DEF = 8'd50;
+    localparam BRI_MIN = 8'd0,   BRI_MAX = 8'd100, BRI_DEF = 8'd100;  // 亮度=有人亮度(比例增益)，默认 100=全亮
     localparam CON_MIN = 8'd50,  CON_MAX = 8'd200, CON_DEF = 8'd100;
     localparam SAT_MIN = 8'd0,   SAT_MAX = 8'd200, SAT_DEF = 8'd100;
     localparam VOL_MIN = 8'd0,   VOL_MAX = 8'd100, VOL_DEF = 8'd100;
     localparam IRN_MIN = 8'd0,   IRN_MAX = 8'd100, IRN_DEF = 8'd100;
+    localparam IRCON_MIN = 8'd50, IRCON_MAX = 8'd200, IRCON_DEF = 8'd100;
+    localparam IRSAT_MIN = 8'd0,  IRSAT_MAX = 8'd200, IRSAT_DEF = 8'd100;
+    localparam IRVOL_MIN = 8'd0,  IRVOL_MAX = 8'd100, IRVOL_DEF = 8'd100;
 
     localparam TRAN_TYPE_MIN = 3'd0, TRAN_TYPE_MAX = 3'd5, TRAN_TYPE_DEF = 3'd1;
 
     localparam [3:0] S_BRI = 4'd0, S_CON = 4'd1, S_SAT = 4'd2,
-                     S_VOL = 4'd3, S_TRAN = 4'd4, S_TE = 4'd5, S_IRN = 4'd6;
+                     S_VOL = 4'd3, S_TRAN = 4'd4, S_TE = 4'd5, S_IRN = 4'd6,
+                     S_IRCON = 4'd7, S_IRSAT = 4'd8, S_IRVOL = 4'd9;
 
     wire adj_dec = I_key_short[0] | I_key_repeat[0];   // key_l：减
     wire adj_inc = I_key_short[2] | I_key_repeat[2];   // key_r：加
@@ -78,6 +85,9 @@ module param_reg #(
             O_sat        <= SAT_DEF;
             O_vol        <= VOL_DEF;
             O_irn        <= IRN_DEF;
+            O_ircon      <= IRCON_DEF;
+            O_irsat      <= IRSAT_DEF;
+            O_irvol      <= IRVOL_DEF;
             O_rot        <= ROT_DEFAULT;      // 固定默认值（不再可调）
             O_tran_type  <= TRAN_TYPE_DEF;    // 默认交叉淡化
             O_tran_en    <= 1'b1;             // 默认开
@@ -155,6 +165,9 @@ module param_reg #(
                 O_sat        <= SAT_DEF;
                 O_vol        <= VOL_DEF;
                 O_irn        <= IRN_DEF;
+                O_ircon      <= IRCON_DEF;
+                O_irsat      <= IRSAT_DEF;
+                O_irvol      <= IRVOL_DEF;
                 O_rot        <= ROT_DEFAULT;
                 O_tran_type  <= TRAN_TYPE_DEF;
                 O_tran_en    <= 1'b1;
@@ -181,6 +194,16 @@ module param_reg #(
                 S_TE:   O_tran_en <= I_u_val[0];
 
                 S_IRN:  O_irn <= (I_u_val > IRN_MAX) ? IRN_MAX : I_u_val;
+
+                S_IRCON: begin
+                    if      (I_u_val < IRCON_MIN) O_ircon <= IRCON_MIN;
+                    else if (I_u_val > IRCON_MAX) O_ircon <= IRCON_MAX;
+                    else                          O_ircon <= I_u_val;
+                end
+
+                S_IRSAT: O_irsat <= (I_u_val > IRSAT_MAX) ? IRSAT_MAX : I_u_val;
+
+                S_IRVOL: O_irvol <= (I_u_val > IRVOL_MAX) ? IRVOL_MAX : I_u_val;
 
                 default: ;
                 endcase
