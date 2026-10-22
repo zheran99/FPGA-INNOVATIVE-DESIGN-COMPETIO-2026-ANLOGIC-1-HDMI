@@ -35,7 +35,8 @@ module p3_panel #(
     wire [8:0] ix=second ? px[8:0]-9'd308 : px[8:0];
     wire [4:0] cy=py[4:0];
     wire hit=py<32 && (px<300 || (px>=308 && px<608));
-    wire border=ix<9'd2 || ix>=9'd298 || cy<5'd2 || cy>=5'd30;
+    wire border=second ? (px<12'd310 || px>=12'd606 || cy<5'd2 || cy>=5'd30) :
+        (px<12'd2 || px>=12'd298 || cy<5'd2 || cy>=5'd30);
     localparam [5:0] CN_BLANK  = 6'd38;   // 空格（现有空位，全 0 不画）
     localparam [5:0] CN_SHUN   = 6'd43;   // 瞬
     localparam [5:0] CN_QIE    = 6'd44;   // 切
@@ -97,23 +98,24 @@ module p3_panel #(
 
     wire [6:0] name_off=second ? {1'b0,ix[5:0]-6'd16} : ix[6:0]-7'd86;
     wire [5:0] value_off=ix[5:0]-6'd52;
-    wire in_name=second ? (ix>=9'd16 && ix<9'd80) : (ix>=9'd86 && ix<9'd214);
-    wire in_value=second && ix>=9'd180 && ix<9'd244;
+    wire in_name=(px>=12'd324 && px<12'd388) || (px>=12'd86 && px<12'd214);
+    wire in_value=px>=12'd488 && px<12'd552;
     wire [4:0] gx=in_value ? value_off[4:0] : name_off[4:0];
 
-    wire [6:0] effect_off=px[6:0]-7'd86;
-    wire [5:0] effect_idx=str_char(I_type,effect_off[6:5]);
-    wire [5:0] value_idx=value_off[5] ? 6'd38 : (I_on ? 6'd0 : 6'd1);
+    wire [5:0] effect_idx=px<12'd118 ? str_char(I_type,2'd0) :
+        px<12'd150 ? str_char(I_type,2'd1) :
+        px<12'd182 ? str_char(I_type,2'd2) : str_char(I_type,2'd3);
+    wire [5:0] value_idx=px>=12'd520 ? CN_BLANK : (I_on ? 6'd0 : 6'd1);
 
-    assign O_font_idx=second ? (ix[7] ? value_idx : (name_off[5] ? 6'd1 : 6'd0)) : effect_idx;
+    assign O_font_idx=second ? (px>=12'd488 ? value_idx : (px>=12'd356 ? 6'd1 : 6'd0)) : effect_idx;
     assign O_font_row=py[4:0];
 
     wire switch_en = second;
     wire switch_on = I_on;
-    wire focus_mark = (!second) && ix>=9'd6 && ix<9'd9 && cy>=5'd11 && cy<5'd21;
-    wire switch_track = switch_en && ix>=9'd248 && ix<9'd284 && cy>=5'd9 && cy<5'd23;
+    wire focus_mark = px>=12'd6 && px<12'd9 && cy>=5'd11 && cy<5'd21;
+    wire switch_track = px>=12'd556 && px<12'd592 && cy>=5'd9 && cy<5'd23;
     wire switch_knob = switch_track && cy>=5'd11 && cy<5'd21 &&
-        (switch_on ? (ix>=9'd270 && ix<9'd282) : (ix>=9'd250 && ix<9'd262));
+        (switch_on ? (px>=12'd578 && px<12'd590) : (px>=12'd558 && px<12'd570));
     wire [2:0] decoration = focus_mark ? 3'd1 :
         switch_knob ? (switch_on ? 3'd4 : 3'd5) :
         switch_track ? (switch_on ? 3'd2 : 3'd3) : 3'd0;

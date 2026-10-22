@@ -63,3 +63,50 @@ module key_remove_shakes(
 	end
 
 endmodule
+
+module ir_brightness #(
+    parameter DEBOUNCE_CYCLES = 25'd1000000,   // 消抖 ~20ms @50MHz
+    parameter ACTIVE_LOW      = 1'b0
+)(
+    input  wire clk,
+    input  wire rst_n,
+    input  wire sensor,      // 高=有人
+    output reg  dim          // 1=有人状态（全亮），0=没人状态（空亮度）
+);
+    reg [1:0]  sync;
+    reg [24:0] db_cnt;       // 消抖计数
+    reg        level;        // 消抖后的「有人」电平
+    reg        level_d;      // level 延迟一拍，用于上升沿检测
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) sync <= 2'd0;
+        else        sync <= {sync[0], ACTIVE_LOW ? ~sensor : sensor};
+    end
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            db_cnt <= 25'd0;
+            level  <= 1'b0;
+        end else if (sync[1] != level) begin
+            if (db_cnt >= DEBOUNCE_CYCLES) begin
+                level  <= sync[1];
+                db_cnt <= 25'd0;
+            end else begin
+                db_cnt <= db_cnt + 25'd1;
+            end
+        end else begin
+            db_cnt <= 25'd0;
+        end
+    end
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            dim     <= 1'b0;
+            level_d <= 1'b0;
+        end else begin
+            level_d <= level;
+            if (level != level_d)
+                dim <= ~dim;
+        end
+    end
+endmodule

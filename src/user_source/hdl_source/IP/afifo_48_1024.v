@@ -95,7 +95,7 @@ always @(posedge wr_clk or posedge wr_rst) begin
     end else begin
         rd_gray_w1 <= rd_gray;
         rd_gray_w2 <= rd_gray_w1;
-        rd_bin_w   <= gray2bin(rd_gray_w1);      // 用 w1 减少一级延迟
+        rd_bin_w   <= gray2bin(rd_gray_w2);
     end
 end
 

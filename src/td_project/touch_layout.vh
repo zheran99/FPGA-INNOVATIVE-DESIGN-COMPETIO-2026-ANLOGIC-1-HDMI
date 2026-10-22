@@ -1,30 +1,50 @@
-localparam TOUCH_HEIGHT=1296;
-localparam TOUCH_GLYPHS=127;
-function [7:0] touch_row; input [10:0] cy; begin touch_row=255;
-if(cy>=32 && cy<80) touch_row=8'd0;
-if(cy>=80 && cy<128) touch_row=8'd1;
-if(cy>=128 && cy<176) touch_row=8'd2;
-if(cy>=176 && cy<224) touch_row=8'd3;
-if(cy>=256 && cy<304) touch_row=8'd4;
-if(cy>=304 && cy<352) touch_row=8'd5;
-if(cy>=352 && cy<400) touch_row=8'd6;
-if(cy>=400 && cy<448) touch_row=8'd7;
-if(cy>=448 && cy<496) touch_row=8'd8;
-if(cy>=496 && cy<544) touch_row=8'd9;
-if(cy>=576 && cy<624) touch_row=8'd10;
-if(cy>=624 && cy<672) touch_row=8'd11;
-if(cy>=672 && cy<720) touch_row=8'd12;
-if(cy>=720 && cy<768) touch_row=8'd13;
-if(cy>=768 && cy<816) touch_row=8'd14;
-if(cy>=816 && cy<864) touch_row=8'd15;
-if(cy>=896 && cy<944) touch_row=8'd16;
-if(cy>=944 && cy<992) touch_row=8'd17;
-if(cy>=992 && cy<1040) touch_row=8'd18;
-if(cy>=1072 && cy<1120) touch_row=8'd21;
-if(cy>=1120 && cy<1168) touch_row=8'd22;
-if(cy>=1200 && cy<1248) touch_row=8'd23;
-if(cy>=1248 && cy<1296) touch_row=8'd24;
-end endfunction
+localparam TOUCH_HEIGHT=264, TOUCH_PAGES=7, TOUCH_ROW_HEIGHT=44;
+localparam TOUCH_GLYPHS=152;
+function [7:0] touch_row; input [2:0] page; input [8:0] cy,cx; begin touch_row=255;
+if(cx>=9'd8 && cx<9'd472) begin case(page)
+3'd0:begin
+if(cy>=9'd0 && cy<9'd44 && cx<9'd236) touch_row=8'd4;
+if(cy>=9'd0 && cy<9'd44 && cx>=9'd244) touch_row=8'd5;
+if(cy>=9'd44 && cy<9'd88) touch_row=8'd6;
+if(cy>=9'd88 && cy<9'd132) touch_row=8'd7;
+end
+3'd1:begin
+if(cy>=9'd0 && cy<9'd44) touch_row=8'd8;
+if(cy>=9'd44 && cy<9'd88) touch_row=8'd9;
+end
+3'd2:begin
+if(cy>=9'd0 && cy<9'd44) touch_row=8'd0;
+if(cy>=9'd44 && cy<9'd88) touch_row=8'd1;
+if(cy>=9'd88 && cy<9'd132) touch_row=8'd2;
+if(cy>=9'd132 && cy<9'd176) touch_row=8'd3;
+if(cy>=9'd176 && cy<9'd220) touch_row=8'd27;
+end
+3'd3:begin
+if(cy>=9'd0 && cy<9'd44) touch_row=8'd10;
+if(cy>=9'd44 && cy<9'd88) touch_row=8'd11;
+if(cy>=9'd88 && cy<9'd132) touch_row=8'd12;
+if(cy>=9'd132 && cy<9'd176) touch_row=8'd13;
+if(cy>=9'd176 && cy<9'd220) touch_row=8'd14;
+if(cy>=9'd220 && cy<9'd264) touch_row=8'd15;
+end
+3'd4:begin
+if(cy>=9'd0 && cy<9'd44) touch_row=8'd16;
+if(cy>=9'd44 && cy<9'd88) touch_row=8'd17;
+if(cy>=9'd88 && cy<9'd132) touch_row=8'd18;
+if(cy>=9'd132 && cy<9'd176) touch_row=8'd19;
+if(cy>=9'd176 && cy<9'd220) touch_row=8'd20;
+if(cy>=9'd220 && cy<9'd264) touch_row=8'd25;
+end
+3'd5:begin
+if(cy>=9'd0 && cy<9'd44) touch_row=8'd21;
+if(cy>=9'd44 && cy<9'd88) touch_row=8'd22;
+if(cy>=9'd88 && cy<9'd132) touch_row=8'd26;
+end
+3'd6:begin
+if(cy>=9'd0 && cy<9'd44) touch_row=8'd23;
+if(cy>=9'd44 && cy<9'd88) touch_row=8'd24;
+end
+default:; endcase end end endfunction
 localparam TOUCH_SLIDER_LEFT=192, TOUCH_SLIDER_RIGHT=448;
 function [7:0] touch_slider_value; input [7:0] id; input [8:0] x;
 reg [8:0] pos; reg [15:0] p25,ticks; begin
@@ -35,46 +55,84 @@ case(id)
 1:begin ticks=((p25<<1)+p25+128)>>8; touch_slider_value=50+(ticks[7:0]<<1); end
 2:begin ticks=((p25<<2)+128)>>8; touch_slider_value=ticks[7:0]<<1; end
 3:begin ticks=((p25<<1)+128)>>8; touch_slider_value=ticks[7:0]<<1; end
+27:begin ticks=((p25<<2)+128)>>8; touch_slider_value=ticks[7:0]; end
 default:begin ticks=0; touch_slider_value=0; end
 endcase end endfunction
-function [10:0] touch_top; input [7:0] id; begin
+function [8:0] touch_top; input [7:0] id; begin
 touch_top=0; case(id)
-0:touch_top=11'd32;
-1:touch_top=11'd80;
-2:touch_top=11'd128;
-3:touch_top=11'd176;
-4:touch_top=11'd256;
-5:touch_top=11'd304;
-6:touch_top=11'd352;
-7:touch_top=11'd400;
-8:touch_top=11'd448;
-9:touch_top=11'd496;
-10:touch_top=11'd576;
-11:touch_top=11'd624;
-12:touch_top=11'd672;
-13:touch_top=11'd720;
-14:touch_top=11'd768;
-15:touch_top=11'd816;
-16:touch_top=11'd896;
-17:touch_top=11'd944;
-18:touch_top=11'd992;
-21:touch_top=11'd1072;
-22:touch_top=11'd1120;
-23:touch_top=11'd1200;
-24:touch_top=11'd1248;
+4:touch_top=9'd0;
+5:touch_top=9'd0;
+6:touch_top=9'd44;
+7:touch_top=9'd88;
+8:touch_top=9'd0;
+9:touch_top=9'd44;
+0:touch_top=9'd0;
+1:touch_top=9'd44;
+2:touch_top=9'd88;
+3:touch_top=9'd132;
+27:touch_top=9'd176;
+10:touch_top=9'd0;
+11:touch_top=9'd44;
+12:touch_top=9'd88;
+13:touch_top=9'd132;
+14:touch_top=9'd176;
+15:touch_top=9'd220;
+16:touch_top=9'd0;
+17:touch_top=9'd44;
+18:touch_top=9'd88;
+19:touch_top=9'd132;
+20:touch_top=9'd176;
+25:touch_top=9'd220;
+21:touch_top=9'd0;
+22:touch_top=9'd44;
+26:touch_top=9'd88;
+23:touch_top=9'd0;
+24:touch_top=9'd44;
+default:; endcase end endfunction
+function [2:0] touch_page; input [7:0] id; begin
+touch_page=7; case(id)
+4:touch_page=3'd0;
+5:touch_page=3'd0;
+6:touch_page=3'd0;
+7:touch_page=3'd0;
+8:touch_page=3'd1;
+9:touch_page=3'd1;
+0:touch_page=3'd2;
+1:touch_page=3'd2;
+2:touch_page=3'd2;
+3:touch_page=3'd2;
+27:touch_page=3'd2;
+10:touch_page=3'd3;
+11:touch_page=3'd3;
+12:touch_page=3'd3;
+13:touch_page=3'd3;
+14:touch_page=3'd3;
+15:touch_page=3'd3;
+16:touch_page=3'd4;
+17:touch_page=3'd4;
+18:touch_page=3'd4;
+19:touch_page=3'd4;
+20:touch_page=3'd4;
+25:touch_page=3'd4;
+21:touch_page=3'd5;
+22:touch_page=3'd5;
+26:touch_page=3'd5;
+23:touch_page=3'd6;
+24:touch_page=3'd6;
 default:; endcase end endfunction
 function [2:0] touch_target; input [7:0] id; begin
 touch_target=7; case(id)
-0:touch_target=3'd0;
-1:touch_target=3'd0;
-2:touch_target=3'd0;
-3:touch_target=3'd0;
 4:touch_target=3'd4;
 5:touch_target=3'd4;
 6:touch_target=3'd4;
 7:touch_target=3'd4;
 8:touch_target=3'd0;
 9:touch_target=3'd0;
+0:touch_target=3'd0;
+1:touch_target=3'd0;
+2:touch_target=3'd0;
+3:touch_target=3'd0;
+27:touch_target=3'd0;
 10:touch_target=3'd1;
 11:touch_target=3'd1;
 12:touch_target=3'd1;
@@ -84,23 +142,28 @@ touch_target=7; case(id)
 16:touch_target=3'd2;
 17:touch_target=3'd2;
 18:touch_target=3'd2;
+19:touch_target=3'd2;
+20:touch_target=3'd2;
+25:touch_target=3'd2;
 21:touch_target=3'd3;
 22:touch_target=3'd3;
+26:touch_target=3'd3;
 23:touch_target=3'd5;
 24:touch_target=3'd5;
 default:; endcase end endfunction
 function [3:0] touch_field; input [7:0] id; begin
 touch_field=0; case(id)
-0:touch_field=4'd0;
-1:touch_field=4'd1;
-2:touch_field=4'd2;
-3:touch_field=4'd3;
 4:touch_field=4'd0;
 5:touch_field=4'd1;
 6:touch_field=4'd2;
 7:touch_field=4'd3;
 8:touch_field=4'd4;
 9:touch_field=4'd5;
+0:touch_field=4'd0;
+1:touch_field=4'd1;
+2:touch_field=4'd2;
+3:touch_field=4'd3;
+27:touch_field=4'd6;
 10:touch_field=4'd4;
 11:touch_field=4'd5;
 12:touch_field=4'd6;
@@ -110,23 +173,28 @@ touch_field=0; case(id)
 16:touch_field=4'd0;
 17:touch_field=4'd1;
 18:touch_field=4'd2;
+19:touch_field=4'd3;
+20:touch_field=4'd4;
+25:touch_field=4'd5;
 21:touch_field=4'd0;
 22:touch_field=4'd1;
+26:touch_field=4'd2;
 23:touch_field=4'd2;
 24:touch_field=4'd3;
 default:; endcase end endfunction
 function [7:0] touch_min; input [7:0] id; begin
 touch_min=0; case(id)
-0:touch_min=8'd0;
-1:touch_min=8'd50;
-2:touch_min=8'd0;
-3:touch_min=8'd0;
 4:touch_min=8'd0;
 5:touch_min=8'd0;
 6:touch_min=8'd0;
 7:touch_min=8'd0;
 8:touch_min=8'd0;
 9:touch_min=8'd0;
+0:touch_min=8'd0;
+1:touch_min=8'd50;
+2:touch_min=8'd0;
+3:touch_min=8'd0;
+27:touch_min=8'd0;
 10:touch_min=8'd0;
 11:touch_min=8'd0;
 12:touch_min=8'd0;
@@ -136,23 +204,28 @@ touch_min=0; case(id)
 16:touch_min=8'd0;
 17:touch_min=8'd0;
 18:touch_min=8'd0;
+19:touch_min=8'd0;
+20:touch_min=8'd0;
+25:touch_min=8'd0;
 21:touch_min=8'd0;
 22:touch_min=8'd0;
+26:touch_min=8'd0;
 23:touch_min=8'd0;
 24:touch_min=8'd0;
 default:; endcase end endfunction
 function [7:0] touch_max; input [7:0] id; begin
 touch_max=0; case(id)
-0:touch_max=8'd100;
-1:touch_max=8'd200;
-2:touch_max=8'd200;
-3:touch_max=8'd100;
 4:touch_max=8'd0;
 5:touch_max=8'd0;
 6:touch_max=8'd1;
 7:touch_max=8'd1;
 8:touch_max=8'd5;
 9:touch_max=8'd1;
+0:touch_max=8'd100;
+1:touch_max=8'd200;
+2:touch_max=8'd200;
+3:touch_max=8'd100;
+27:touch_max=8'd100;
 10:touch_max=8'd1;
 11:touch_max=8'd1;
 12:touch_max=8'd2;
@@ -162,23 +235,28 @@ touch_max=0; case(id)
 16:touch_max=8'd2;
 17:touch_max=8'd1;
 18:touch_max=8'd2;
+19:touch_max=8'd2;
+20:touch_max=8'd1;
+25:touch_max=8'd2;
 21:touch_max=8'd1;
 22:touch_max=8'd1;
+26:touch_max=8'd1;
 23:touch_max=8'd0;
 24:touch_max=8'd0;
 default:; endcase end endfunction
 function [7:0] touch_step; input [7:0] id; begin
 touch_step=0; case(id)
-0:touch_step=8'd1;
-1:touch_step=8'd2;
-2:touch_step=8'd2;
-3:touch_step=8'd2;
 4:touch_step=8'd0;
 5:touch_step=8'd0;
 6:touch_step=8'd0;
 7:touch_step=8'd0;
 8:touch_step=8'd0;
 9:touch_step=8'd0;
+0:touch_step=8'd1;
+1:touch_step=8'd2;
+2:touch_step=8'd2;
+3:touch_step=8'd2;
+27:touch_step=8'd1;
 10:touch_step=8'd0;
 11:touch_step=8'd0;
 12:touch_step=8'd0;
@@ -188,287 +266,275 @@ touch_step=0; case(id)
 16:touch_step=8'd0;
 17:touch_step=8'd0;
 18:touch_step=8'd0;
+19:touch_step=8'd0;
+20:touch_step=8'd0;
+25:touch_step=8'd0;
 21:touch_step=8'd0;
 22:touch_step=8'd0;
+26:touch_step=8'd0;
 23:touch_step=8'd0;
 24:touch_step=8'd0;
 default:; endcase end endfunction
-function [6:0] touch_label; input [10:0] cy; input [4:0] ch;
+function [7:0] touch_label; input [7:0] id; input [4:0] ch;
 begin touch_label=0;
-if(cy>=8 && cy<24) begin case(ch)
-0:touch_label=7'd1;
-1:touch_label=7'd2;
-2:touch_label=7'd3;
-3:touch_label=7'd4;
+if(id==8'd4) begin case(ch)
+0:touch_label=8'd16;
+1:touch_label=8'd17;
+2:touch_label=8'd18;
 default:; endcase end
-if(cy>=48 && cy<64) begin case(ch)
-0:touch_label=7'd5;
-1:touch_label=7'd6;
+if(id==8'd5) begin case(ch)
+0:touch_label=8'd19;
+1:touch_label=8'd17;
+2:touch_label=8'd18;
 default:; endcase end
-if(cy>=96 && cy<112) begin case(ch)
-0:touch_label=7'd7;
-1:touch_label=7'd8;
-2:touch_label=7'd6;
+if(id==8'd6) begin case(ch)
+0:touch_label=8'd20;
+1:touch_label=8'd12;
 default:; endcase end
-if(cy>=144 && cy<160) begin case(ch)
-0:touch_label=7'd9;
-1:touch_label=7'd10;
-2:touch_label=7'd6;
+if(id==8'd7) begin case(ch)
+0:touch_label=8'd4;
+1:touch_label=8'd48;
+2:touch_label=8'd21;
+3:touch_label=8'd22;
 default:; endcase end
-if(cy>=192 && cy<208) begin case(ch)
-0:touch_label=7'd4;
-1:touch_label=7'd11;
+if(id==8'd8) begin case(ch)
+0:touch_label=8'd14;
+1:touch_label=8'd15;
+2:touch_label=8'd23;
+3:touch_label=8'd24;
 default:; endcase end
-if(cy>=232 && cy<248) begin case(ch)
-0:touch_label=7'd12;
-1:touch_label=7'd13;
-2:touch_label=7'd14;
-3:touch_label=7'd15;
+if(id==8'd9) begin case(ch)
+0:touch_label=8'd14;
+1:touch_label=8'd15;
+2:touch_label=8'd25;
+3:touch_label=8'd26;
 default:; endcase end
-if(cy>=272 && cy<288) begin case(ch)
-0:touch_label=7'd16;
-1:touch_label=7'd17;
-2:touch_label=7'd18;
+if(id==8'd0) begin case(ch)
+0:touch_label=8'd5;
+1:touch_label=8'd6;
 default:; endcase end
-if(cy>=320 && cy<336) begin case(ch)
-0:touch_label=7'd19;
-1:touch_label=7'd17;
-2:touch_label=7'd18;
+if(id==8'd1) begin case(ch)
+0:touch_label=8'd7;
+1:touch_label=8'd8;
+2:touch_label=8'd6;
 default:; endcase end
-if(cy>=368 && cy<384) begin case(ch)
-0:touch_label=7'd20;
-1:touch_label=7'd12;
+if(id==8'd2) begin case(ch)
+0:touch_label=8'd9;
+1:touch_label=8'd10;
+2:touch_label=8'd6;
 default:; endcase end
-if(cy>=416 && cy<432) begin case(ch)
-0:touch_label=7'd4;
-1:touch_label=7'd48;
-2:touch_label=7'd21;
-3:touch_label=7'd22;
+if(id==8'd3) begin case(ch)
+0:touch_label=8'd4;
+1:touch_label=8'd11;
 default:; endcase end
-if(cy>=464 && cy<480) begin case(ch)
-0:touch_label=7'd14;
-1:touch_label=7'd15;
-2:touch_label=7'd23;
-3:touch_label=7'd24;
+if(id==8'd10) begin case(ch)
+0:touch_label=8'd27;
+1:touch_label=8'd28;
+2:touch_label=8'd25;
+3:touch_label=8'd26;
 default:; endcase end
-if(cy>=512 && cy<528) begin case(ch)
-0:touch_label=7'd14;
-1:touch_label=7'd15;
-2:touch_label=7'd25;
-3:touch_label=7'd26;
+if(id==8'd11) begin case(ch)
+0:touch_label=8'd29;
+1:touch_label=8'd30;
 default:; endcase end
-if(cy>=552 && cy<568) begin case(ch)
-0:touch_label=7'd27;
-1:touch_label=7'd28;
+if(id==8'd12) begin case(ch)
+0:touch_label=8'd31;
+1:touch_label=8'd32;
 default:; endcase end
-if(cy>=592 && cy<608) begin case(ch)
-0:touch_label=7'd27;
-1:touch_label=7'd28;
-2:touch_label=7'd25;
-3:touch_label=7'd26;
+if(id==8'd13) begin case(ch)
+0:touch_label=8'd27;
+1:touch_label=8'd28;
+2:touch_label=8'd33;
+3:touch_label=8'd34;
 default:; endcase end
-if(cy>=640 && cy<656) begin case(ch)
-0:touch_label=7'd29;
-1:touch_label=7'd30;
+if(id==8'd14) begin case(ch)
+0:touch_label=8'd27;
+1:touch_label=8'd35;
 default:; endcase end
-if(cy>=688 && cy<704) begin case(ch)
-0:touch_label=7'd31;
-1:touch_label=7'd32;
+if(id==8'd15) begin case(ch)
+0:touch_label=8'd36;
+1:touch_label=8'd37;
+2:touch_label=8'd38;
 default:; endcase end
-if(cy>=736 && cy<752) begin case(ch)
-0:touch_label=7'd27;
-1:touch_label=7'd28;
-2:touch_label=7'd33;
-3:touch_label=7'd34;
+if(id==8'd16) begin case(ch)
+0:touch_label=8'd41;
+1:touch_label=8'd42;
 default:; endcase end
-if(cy>=784 && cy<800) begin case(ch)
-0:touch_label=7'd27;
-1:touch_label=7'd35;
+if(id==8'd17) begin case(ch)
+0:touch_label=8'd39;
+1:touch_label=8'd40;
+2:touch_label=8'd25;
+3:touch_label=8'd26;
 default:; endcase end
-if(cy>=832 && cy<848) begin case(ch)
-0:touch_label=7'd36;
-1:touch_label=7'd37;
-2:touch_label=7'd38;
+if(id==8'd18) begin case(ch)
+0:touch_label=8'd39;
+1:touch_label=8'd40;
+2:touch_label=8'd33;
+3:touch_label=8'd34;
 default:; endcase end
-if(cy>=872 && cy<888) begin case(ch)
-0:touch_label=7'd39;
-1:touch_label=7'd40;
+if(id==8'd19) begin case(ch)
+0:touch_label=8'd39;
+1:touch_label=8'd40;
+2:touch_label=8'd127;
+3:touch_label=8'd128;
 default:; endcase end
-if(cy>=912 && cy<928) begin case(ch)
-0:touch_label=7'd41;
-1:touch_label=7'd42;
+if(id==8'd20) begin case(ch)
+0:touch_label=8'd39;
+1:touch_label=8'd40;
+2:touch_label=8'd129;
+3:touch_label=8'd130;
 default:; endcase end
-if(cy>=960 && cy<976) begin case(ch)
-0:touch_label=7'd39;
-1:touch_label=7'd40;
-2:touch_label=7'd25;
-3:touch_label=7'd26;
+if(id==8'd25) begin case(ch)
+0:touch_label=8'd41;
+1:touch_label=8'd42;
+2:touch_label=8'd148;
+3:touch_label=8'd81;
 default:; endcase end
-if(cy>=1008 && cy<1024) begin case(ch)
-0:touch_label=7'd39;
-1:touch_label=7'd40;
-2:touch_label=7'd33;
-3:touch_label=7'd34;
+if(id==8'd21) begin case(ch)
+0:touch_label=8'd48;
+1:touch_label=8'd49;
+2:touch_label=8'd25;
+3:touch_label=8'd26;
 default:; endcase end
-if(cy>=1048 && cy<1064) begin case(ch)
-0:touch_label=7'd48;
-1:touch_label=7'd49;
+if(id==8'd22) begin case(ch)
+0:touch_label=8'd50;
+1:touch_label=8'd51;
 default:; endcase end
-if(cy>=1088 && cy<1104) begin case(ch)
-0:touch_label=7'd48;
-1:touch_label=7'd49;
-2:touch_label=7'd25;
-3:touch_label=7'd26;
+if(id==8'd26) begin case(ch)
+0:touch_label=8'd149;
+1:touch_label=8'd37;
+2:touch_label=8'd140;
 default:; endcase end
-if(cy>=1136 && cy<1152) begin case(ch)
-0:touch_label=7'd50;
-1:touch_label=7'd51;
+if(id==8'd23) begin case(ch)
+0:touch_label=8'd54;
+1:touch_label=8'd55;
+2:touch_label=8'd56;
+3:touch_label=8'd57;
 default:; endcase end
-if(cy>=1176 && cy<1192) begin case(ch)
-0:touch_label=7'd52;
-1:touch_label=7'd53;
+if(id==8'd24) begin case(ch)
+0:touch_label=8'd58;
+1:touch_label=8'd59;
+2:touch_label=8'd60;
+3:touch_label=8'd61;
 default:; endcase end
-if(cy>=1216 && cy<1232) begin case(ch)
-0:touch_label=7'd54;
-1:touch_label=7'd55;
-2:touch_label=7'd56;
-3:touch_label=7'd57;
-default:; endcase end
-if(cy>=1264 && cy<1280) begin case(ch)
-0:touch_label=7'd58;
-1:touch_label=7'd59;
-2:touch_label=7'd60;
-3:touch_label=7'd61;
+if(id==8'd27) begin case(ch)
+0:touch_label=8'd100;
+1:touch_label=8'd5;
+2:touch_label=8'd6;
 default:; endcase end
 end endfunction
-function [3:0] touch_label_y; input [10:0] cy; begin touch_label_y=0;
-if(cy>=8 && cy<24) touch_label_y=cy-8;
-if(cy>=48 && cy<64) touch_label_y=cy-48;
-if(cy>=96 && cy<112) touch_label_y=cy-96;
-if(cy>=144 && cy<160) touch_label_y=cy-144;
-if(cy>=192 && cy<208) touch_label_y=cy-192;
-if(cy>=232 && cy<248) touch_label_y=cy-232;
-if(cy>=272 && cy<288) touch_label_y=cy-272;
-if(cy>=320 && cy<336) touch_label_y=cy-320;
-if(cy>=368 && cy<384) touch_label_y=cy-368;
-if(cy>=416 && cy<432) touch_label_y=cy-416;
-if(cy>=464 && cy<480) touch_label_y=cy-464;
-if(cy>=512 && cy<528) touch_label_y=cy-512;
-if(cy>=552 && cy<568) touch_label_y=cy-552;
-if(cy>=592 && cy<608) touch_label_y=cy-592;
-if(cy>=640 && cy<656) touch_label_y=cy-640;
-if(cy>=688 && cy<704) touch_label_y=cy-688;
-if(cy>=736 && cy<752) touch_label_y=cy-736;
-if(cy>=784 && cy<800) touch_label_y=cy-784;
-if(cy>=832 && cy<848) touch_label_y=cy-832;
-if(cy>=872 && cy<888) touch_label_y=cy-872;
-if(cy>=912 && cy<928) touch_label_y=cy-912;
-if(cy>=960 && cy<976) touch_label_y=cy-960;
-if(cy>=1008 && cy<1024) touch_label_y=cy-1008;
-if(cy>=1048 && cy<1064) touch_label_y=cy-1048;
-if(cy>=1088 && cy<1104) touch_label_y=cy-1088;
-if(cy>=1136 && cy<1152) touch_label_y=cy-1136;
-if(cy>=1176 && cy<1192) touch_label_y=cy-1176;
-if(cy>=1216 && cy<1232) touch_label_y=cy-1216;
-if(cy>=1264 && cy<1280) touch_label_y=cy-1264;
-end endfunction
-function [6:0] touch_string; input [5:0] id; input [4:0] ch; begin
+function [7:0] touch_string; input [5:0] id; input [4:0] ch; begin
 touch_string=0; case({id,ch})
-11'd0:touch_string=7'd72;
-11'd1:touch_string=7'd70;
-11'd2:touch_string=7'd0;
-11'd3:touch_string=7'd1;
-11'd4:touch_string=7'd2;
-11'd5:touch_string=7'd108;
-11'd6:touch_string=7'd109;
-11'd32:touch_string=7'd110;
-11'd33:touch_string=7'd86;
-11'd34:touch_string=7'd29;
-11'd35:touch_string=7'd111;
-11'd36:touch_string=7'd72;
-11'd37:touch_string=7'd70;
-11'd38:touch_string=7'd112;
-11'd39:touch_string=7'd113;
-11'd64:touch_string=7'd114;
-11'd65:touch_string=7'd84;
-11'd66:touch_string=7'd103;
-11'd67:touch_string=7'd123;
-11'd68:touch_string=7'd124;
-11'd69:touch_string=7'd125;
-11'd70:touch_string=7'd126;
-11'd96:touch_string=7'd93;
-11'd97:touch_string=7'd94;
-11'd128:touch_string=7'd95;
-11'd129:touch_string=7'd96;
-11'd160:touch_string=7'd97;
-11'd161:touch_string=7'd98;
-11'd192:touch_string=7'd99;
-11'd193:touch_string=7'd100;
-11'd224:touch_string=7'd29;
-11'd225:touch_string=7'd101;
-11'd256:touch_string=7'd102;
-11'd257:touch_string=7'd104;
-11'd288:touch_string=7'd103;
-11'd289:touch_string=7'd104;
-11'd320:touch_string=7'd102;
-11'd352:touch_string=7'd103;
-11'd384:touch_string=7'd43;
-11'd385:touch_string=7'd44;
-11'd386:touch_string=7'd106;
-11'd387:touch_string=7'd107;
-11'd416:touch_string=7'd54;
-11'd417:touch_string=7'd55;
-11'd418:touch_string=7'd56;
-11'd419:touch_string=7'd57;
-11'd448:touch_string=7'd25;
-11'd480:touch_string=7'd26;
-11'd512:touch_string=7'd76;
-11'd544:touch_string=7'd77;
-11'd545:touch_string=7'd78;
-11'd576:touch_string=7'd79;
-11'd577:touch_string=7'd80;
-11'd608:touch_string=7'd83;
-11'd609:touch_string=7'd84;
-11'd640:touch_string=7'd85;
-11'd641:touch_string=7'd86;
-11'd672:touch_string=7'd80;
-11'd673:touch_string=7'd88;
-11'd704:touch_string=7'd87;
-11'd705:touch_string=7'd88;
-11'd736:touch_string=7'd89;
-11'd737:touch_string=7'd19;
-11'd768:touch_string=7'd81;
-11'd800:touch_string=7'd82;
-11'd832:touch_string=7'd90;
-11'd833:touch_string=7'd91;
-11'd864:touch_string=7'd92;
-11'd865:touch_string=7'd85;
-11'd896:touch_string=7'd115;
-11'd897:touch_string=7'd116;
-11'd928:touch_string=7'd58;
-11'd929:touch_string=7'd59;
-11'd930:touch_string=7'd75;
-11'd931:touch_string=7'd65;
-11'd960:touch_string=7'd86;
-11'd961:touch_string=7'd29;
-11'd992:touch_string=7'd41;
-11'd993:touch_string=7'd42;
-11'd1024:touch_string=7'd84;
+11'd32:touch_string=8'd110;
+11'd33:touch_string=8'd86;
+11'd34:touch_string=8'd29;
+11'd35:touch_string=8'd111;
+11'd36:touch_string=8'd72;
+11'd37:touch_string=8'd70;
+11'd38:touch_string=8'd112;
+11'd39:touch_string=8'd113;
+11'd416:touch_string=8'd54;
+11'd417:touch_string=8'd55;
+11'd418:touch_string=8'd56;
+11'd419:touch_string=8'd57;
+11'd448:touch_string=8'd25;
+11'd480:touch_string=8'd26;
+11'd512:touch_string=8'd76;
+11'd544:touch_string=8'd77;
+11'd545:touch_string=8'd78;
+11'd576:touch_string=8'd79;
+11'd577:touch_string=8'd80;
+11'd608:touch_string=8'd83;
+11'd609:touch_string=8'd84;
+11'd640:touch_string=8'd85;
+11'd641:touch_string=8'd86;
+11'd672:touch_string=8'd80;
+11'd673:touch_string=8'd88;
+11'd704:touch_string=8'd87;
+11'd705:touch_string=8'd88;
+11'd736:touch_string=8'd89;
+11'd737:touch_string=8'd19;
+11'd768:touch_string=8'd81;
+11'd800:touch_string=8'd82;
+11'd832:touch_string=8'd90;
+11'd833:touch_string=8'd91;
+11'd864:touch_string=8'd92;
+11'd865:touch_string=8'd85;
+11'd928:touch_string=8'd150;
+11'd929:touch_string=8'd63;
+11'd930:touch_string=8'd151;
+11'd931:touch_string=8'd62;
+11'd960:touch_string=8'd86;
+11'd961:touch_string=8'd29;
+11'd1024:touch_string=8'd84;
+11'd1056:touch_string=8'd72;
+11'd1057:touch_string=8'd64;
+11'd1058:touch_string=8'd0;
+11'd1059:touch_string=8'd12;
+11'd1060:touch_string=8'd13;
+11'd1088:touch_string=8'd72;
+11'd1089:touch_string=8'd65;
+11'd1090:touch_string=8'd0;
+11'd1091:touch_string=8'd14;
+11'd1092:touch_string=8'd15;
+11'd1120:touch_string=8'd72;
+11'd1121:touch_string=8'd66;
+11'd1122:touch_string=8'd0;
+11'd1123:touch_string=8'd1;
+11'd1124:touch_string=8'd2;
+11'd1125:touch_string=8'd3;
+11'd1126:touch_string=8'd4;
+11'd1152:touch_string=8'd72;
+11'd1153:touch_string=8'd67;
+11'd1154:touch_string=8'd0;
+11'd1155:touch_string=8'd27;
+11'd1156:touch_string=8'd28;
+11'd1184:touch_string=8'd72;
+11'd1185:touch_string=8'd68;
+11'd1186:touch_string=8'd0;
+11'd1187:touch_string=8'd39;
+11'd1188:touch_string=8'd40;
+11'd1216:touch_string=8'd72;
+11'd1217:touch_string=8'd69;
+11'd1218:touch_string=8'd0;
+11'd1219:touch_string=8'd48;
+11'd1220:touch_string=8'd49;
+11'd1248:touch_string=8'd72;
+11'd1249:touch_string=8'd70;
+11'd1250:touch_string=8'd0;
+11'd1251:touch_string=8'd52;
+11'd1252:touch_string=8'd53;
+11'd1280:touch_string=8'd82;
+11'd1281:touch_string=8'd131;
+11'd1312:touch_string=8'd132;
+11'd1313:touch_string=8'd131;
+11'd1344:touch_string=8'd133;
+11'd1345:touch_string=8'd127;
+11'd1376:touch_string=8'd134;
+11'd1377:touch_string=8'd16;
+11'd1408:touch_string=8'd135;
+11'd1409:touch_string=8'd82;
+11'd1440:touch_string=8'd136;
+11'd1441:touch_string=8'd86;
+11'd1472:touch_string=8'd137;
+11'd1473:touch_string=8'd138;
+11'd1474:touch_string=8'd139;
+11'd1475:touch_string=8'd140;
+11'd1504:touch_string=8'd90;
+11'd1505:touch_string=8'd91;
+11'd1506:touch_string=8'd141;
+11'd1507:touch_string=8'd98;
+11'd1536:touch_string=8'd142;
+11'd1537:touch_string=8'd143;
+11'd1538:touch_string=8'd144;
+11'd1568:touch_string=8'd92;
+11'd1569:touch_string=8'd145;
+11'd1600:touch_string=8'd146;
+11'd1601:touch_string=8'd147;
+11'd1632:touch_string=8'd148;
 default:; endcase end endfunction
 function [4:0] touch_string_len; input [5:0] id; begin case(id)
-0:touch_string_len=5'd7;
 1:touch_string_len=5'd8;
-2:touch_string_len=5'd7;
-3:touch_string_len=5'd2;
-4:touch_string_len=5'd2;
-5:touch_string_len=5'd2;
-6:touch_string_len=5'd2;
-7:touch_string_len=5'd2;
-8:touch_string_len=5'd2;
-9:touch_string_len=5'd2;
-10:touch_string_len=5'd1;
-11:touch_string_len=5'd1;
-12:touch_string_len=5'd4;
 13:touch_string_len=5'd4;
 14:touch_string_len=5'd1;
 15:touch_string_len=5'd1;
@@ -484,21 +550,47 @@ function [4:0] touch_string_len; input [5:0] id; begin case(id)
 25:touch_string_len=5'd1;
 26:touch_string_len=5'd2;
 27:touch_string_len=5'd2;
-28:touch_string_len=5'd2;
 29:touch_string_len=5'd4;
 30:touch_string_len=5'd2;
-31:touch_string_len=5'd2;
 32:touch_string_len=5'd1;
+33:touch_string_len=5'd5;
+34:touch_string_len=5'd5;
+35:touch_string_len=5'd7;
+36:touch_string_len=5'd5;
+37:touch_string_len=5'd5;
+38:touch_string_len=5'd5;
+39:touch_string_len=5'd5;
+40:touch_string_len=5'd2;
+41:touch_string_len=5'd2;
+42:touch_string_len=5'd2;
+43:touch_string_len=5'd2;
+44:touch_string_len=5'd2;
+45:touch_string_len=5'd2;
+46:touch_string_len=5'd4;
+47:touch_string_len=5'd4;
+48:touch_string_len=5'd3;
+49:touch_string_len=5'd2;
+50:touch_string_len=5'd2;
+51:touch_string_len=5'd1;
 default:touch_string_len=0; endcase end endfunction
-function [6:0] touch_digit; input [3:0] digit; begin case(digit)
-0:touch_digit=7'd62;
-1:touch_digit=7'd63;
-2:touch_digit=7'd64;
-3:touch_digit=7'd65;
-4:touch_digit=7'd66;
-5:touch_digit=7'd67;
-6:touch_digit=7'd68;
-7:touch_digit=7'd69;
-8:touch_digit=7'd70;
-9:touch_digit=7'd71;
+function [7:0] touch_digit; input [3:0] digit; begin case(digit)
+0:touch_digit=8'd62;
+1:touch_digit=8'd63;
+2:touch_digit=8'd64;
+3:touch_digit=8'd65;
+4:touch_digit=8'd66;
+5:touch_digit=8'd67;
+6:touch_digit=8'd68;
+7:touch_digit=8'd69;
+8:touch_digit=8'd70;
+9:touch_digit=8'd71;
 default:touch_digit=0; endcase end endfunction
+
+function [11:0] touch_bcd; input [7:0] value;
+reg [11:0] bcd; integer bit_index; begin bcd=0;
+for(bit_index=7;bit_index>=0;bit_index=bit_index-1) begin
+if(bcd[3:0]>=4'd5) bcd[3:0]=bcd[3:0]+4'd3;
+if(bcd[7:4]>=4'd5) bcd[7:4]=bcd[7:4]+4'd3;
+if(bcd[11:8]>=4'd5) bcd[11:8]=bcd[11:8]+4'd3;
+bcd={bcd[10:0],value[bit_index]}; end
+touch_bcd=bcd; end endfunction

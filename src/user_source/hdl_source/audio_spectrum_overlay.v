@@ -15,53 +15,11 @@ module audio_spectrum_overlay (
     wire frame_start=I_vs && !vs_prev;
     wire fft_valid;
     wire [127:0] fft_levels;
-    reg [127:0] filter_input,filtered_levels;
-    reg [10:0] filter_history [0:15];
-    reg [3:0] filter_lane;
-    reg [15:0] filter_select;
-    reg [2:0] filter_state;
-    reg [10:0] filter_current,filter_target;
-    reg [11:0] filter_weighted;
-    reg [12:0] filter_sum;
-    reg filtered_valid;
-    wire clear_filter=frame_start && (!I_en || !active);
-    wire [10:0] filter_next=filter_sum[12:2];
-    wire [10:0] filter_rounded=filter_next+11'd8;
 
+    wire [127:0] filtered_levels=fft_levels;
+    wire filtered_valid=fft_valid && active;
+    wire clear_filter=frame_start && (!I_en || !active);
     genvar lane;
-    generate for(lane=0;lane<16;lane=lane+1) begin: temporal_history
-        always @(posedge I_clk or posedge I_rst) begin
-            if(I_rst) begin filter_history[lane]<=0;filtered_levels[lane*8+:8]<=0;end
-            else if(clear_filter) begin filter_history[lane]<=0;filtered_levels[lane*8+:8]<=0;end
-            else if(filter_state==4 && filter_select[lane]) begin
-                filter_history[lane]<=filter_next;
-                filtered_levels[lane*8+:8]<={1'b0,filter_rounded[10:4]};
-            end
-        end
-    end endgenerate
-    always @(posedge I_clk or posedge I_rst) begin
-        if(I_rst) begin
-            filter_input<=0;filter_lane<=0;filter_select<=0;filter_state<=0;
-            filter_current<=0;filter_target<=0;filter_weighted<=0;filter_sum<=0;filtered_valid<=0;
-        end else begin
-            filtered_valid<=0;
-            if(clear_filter) begin filter_state<=0;filter_select<=0;end
-            else case(filter_state)
-                0:if(fft_valid && active)begin filter_input<=fft_levels;filter_lane<=0;filter_state<=1;end
-                1:begin
-                    filter_current<=filter_history[filter_lane];
-                    filter_target<={filter_input[filter_lane*8+:7],4'b0};
-                    filter_select<=16'b1<<filter_lane;filter_state<=2;
-                end
-                2:begin filter_weighted<={1'b0,filter_current}+{filter_current,1'b0};filter_state<=3;end
-                3:begin filter_sum<={1'b0,filter_weighted}+{2'b0,filter_target}+13'd2;filter_state<=4;end
-                4:if(filter_lane==15) filter_state<=5;
-                  else begin filter_lane<=filter_lane+1'b1;filter_state<=1;end
-                5:begin filtered_valid<=1;filter_state<=0;end
-                default:filter_state<=0;
-            endcase
-        end
-    end
     reg [127:0] latest;
     reg [7:0] front [0:15];
     reg [7:0] pending_front [0:15];

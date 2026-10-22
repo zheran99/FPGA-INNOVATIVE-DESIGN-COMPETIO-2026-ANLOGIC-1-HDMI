@@ -9,7 +9,7 @@
 | 路径 | 内容 |
 | --- | --- |
 | `src/td_project/` | Tang Dynasty 工程，打开 `HDMI1.4b_Transmitter_v1.0.al` |
-| `src/td_project/best_result/` | 已验证的位流 |
+| `src/td_project/best_result/` | 最近一次保存的位流（RTL 更新后需重新综合） |
 | `src/user_source/hdl_source/` | RTL 源码，顶层为 `top_tf_hdmi_audio.v` |
 | `src/user_source/constraints_source/` | 引脚约束与时钟约束 |
 | `tools/deploy_sd.py` | TF 卡一键部署脚本 |
@@ -129,7 +129,12 @@
 | `SBGn` | 0-2 | 字幕背景：0 无 / 1 半透 / 2 实底 |
 | `MONn` | 0/1 | 字幕监视信息开关 |
 | `SSZn` | 0/1 | 字幕字号 |
-| `LOGn` | 0-2 | Logo 显示方式 |
+| `LOGn` | 0-2 | Logo 显示方式：0 关 / 1 静止 / 2 弹移 |
+| `ADEn` | 0/1 | 广告文字开关 |
+| `ADBn` | 0-2 | 广告背景：0 无 / 1 半透 / 2 实底 |
+| `ADLn` | 0-2 | 广告语言：0 中文 / 1 英文 / 2 双语 |
+| `ADPn` | 0/1 | 广告位置：0 左上 / 1 上方居中 |
+| `ADST` | 无 | 查询广告设置，返回 `AD LANG=000 LAYOUT=000` |
 | `SPEn` | 0/1 | 频谱开关 |
 | `SPSn` | 1/2 | 频谱方向 |
 
@@ -137,12 +142,16 @@
 
 | 情况 | 返回 |
 | --- | --- |
-| 查询成功 | `PONG` / `OK VERS=xxxx` / `P=n ...` |
+| 查询成功 | `PONG` / `OK VERS=xxxx` / `P=n ...` / `AD LANG=000 LAYOUT=000` |
 | 设置成功 | `OK B=080`，回显命令名与 3 位生效值 |
 | 执行成功 | `OK NEXT` 等，仅回显命令名 |
 | 出错 | `ERR CMD` 未知命令 / `ERR FMT` 格式或长度错误 / `ERR LONG` 超长 / `ERR TIME` 帧超时 / `ERR MODE` 非模式 8 / `ERR IMPL` 未实现 |
 
 未实现命令为 `SYNC`、`IMG`、`SSP`，返回 `ERR IMPL`。
+
+`ADL`、`ADP`、`ADB`、`ADE` 控制广告文字的语言、位置、背景与开关，需与 `ADST`
+配合查看当前值。素材里的广告文案按中文排版写入，暂未提供英文文案，
+`ADL1` / `ADL2` 下不会显示英文行。
 
 ### STAT 状态行
 
@@ -167,6 +176,7 @@ P=008 BRIT=050 CON=100 SATS=100 VOLU=050 TRAN=002 TE=001 IMG=001/009 AUTO=000 SU
 ```
 PING
 STAT
+ADST
 B080
 T003
 NEXT

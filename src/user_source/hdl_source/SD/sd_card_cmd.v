@@ -1,4 +1,5 @@
 module sd_card_cmd(
+    output idle,
 	input                       sys_clk,
 	input                       rst,
 	input[15:0]                 spi_clk_div,
@@ -49,6 +50,7 @@ reg[7:0]                      send_data;
 wire[7:0]                     data_recv;
 reg[9:0]                      wr_data_cnt;
 
+assign idle = (state == S_WAIT) && !spi_wr_req;
 assign cmd_req_ack = (state == S_END);
 assign block_read_req_ack = (state == S_READ_ACK);
 assign block_write_req_ack= (state == S_WRITE_ACK);

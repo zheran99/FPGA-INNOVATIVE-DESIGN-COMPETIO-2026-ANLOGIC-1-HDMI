@@ -17,8 +17,9 @@ module p7_panel #(
 )(
     input wire I_clk,I_rst,I_de,I_hs,I_vs,
     input wire [23:0] I_rgb,
-    input wire I_panel_en,I_item,I_on,I_horizontal,
-    output wire [5:0] O_font_idx,
+    input wire I_panel_en,I_on,I_horizontal,I_visual_on,
+    input wire [1:0] I_item,
+    output wire [6:0] O_font_idx,
     output wire [4:0] O_font_row,
     input wire [31:0] I_font_word,
     output wire O_de,O_hs,O_vs,
@@ -29,29 +30,42 @@ module p7_panel #(
     reg [11:0] px,py;
     reg [23:0] rgb1,rgb2,rgb3;
     reg [3:0] de_pipe,hs_pipe,vs_pipe;
-    wire second=px>=308;
 
-    wire [8:0] ix=second ? px[8:0]-9'd308 : px[8:0];
+    wire [11:0] px_next=x-12'd182;
+    wire third_next=px_next>=12'd616;
+    wire second_next=px_next>=12'd308 && !third_next;
+    reg third,second;
+    reg [8:0] ix;
+    always @(posedge I_clk or posedge I_rst) begin
+        if(I_rst) begin third<=0;second<=0;ix<=0;end
+        else begin
+            third<=third_next;second<=second_next;
+            ix<=third_next ? x[8:0]-9'd286 :
+                second_next ? x[8:0]-9'd490 : x[8:0]-9'd182;
+        end
+    end
+    wire [1:0] card=third ? 2'd2 : second ? 2'd1 : 2'd0;
+
     wire [4:0] cy=py[4:0];
-    wire hit=py<32 && (px<300 || (px>=308 && px<608));
+    wire hit=py<32 && (px<300 || (px>=308 && px<608) || (px>=616 && px<916));
     wire border=ix<9'd2 || ix>=9'd298 || cy<5'd2 || cy>=5'd30;
     wire [5:0] name_off=ix[5:0]-6'd16,value_off=ix[5:0]-6'd52;
-    wire in_name=ix>=9'd16 && ix<9'd80;
+    wire in_name=ix>=9'd16 && ix<(third ? 9'd112 : 9'd80);
     wire in_value=ix>=9'd180 && ix<9'd244;
     wire [4:0] gx=in_value ? value_off[4:0] : name_off[4:0];
-    wire [5:0] name_idx=second ? (name_off[5] ? 6'd63 : 6'd62) :
+    wire [6:0] name_idx=third ? (ix>=80 ? 7'd48 : name_off[5] ? 7'd11 : 7'd75) : second ? (name_off[5] ? 6'd63 : 6'd62) :
                                              (name_off[5] ? 6'd61 : 6'd60);
-    wire [5:0] value_idx=second ?
+    wire [6:0] value_idx=second ?
         (I_horizontal ? (value_off[5] ? 6'd50 : 6'd49) :
                         (value_off[5] ? 6'd14 : 6'd56)) :
-        (value_off[5] ? 6'd38 : (I_on ? 6'd0 : 6'd1));
+        (value_off[5] ? 6'd38 : ((third ? I_visual_on : I_on) ? 6'd0 : 6'd1));
 
     assign O_font_idx=ix[7] ? value_idx : name_idx;
     assign O_font_row=py[4:0];
 
     wire switch_en = !second;
-    wire switch_on = I_on;
-    wire focus_mark = (second==I_item) && ix>=9'd6 && ix<9'd9 && cy>=5'd11 && cy<5'd21;
+    wire switch_on = third ? I_visual_on : I_on;
+    wire focus_mark = (card==I_item) && ix>=9'd6 && ix<9'd9 && cy>=5'd11 && cy<5'd21;
     wire switch_track = switch_en && ix>=9'd248 && ix<9'd284 && cy>=5'd9 && cy<5'd23;
     wire switch_knob = switch_track && cy>=5'd11 && cy<5'd21 &&
         (switch_on ? (ix>=9'd270 && ix<9'd282) : (ix>=9'd250 && ix<9'd262));
@@ -93,13 +107,13 @@ module p7_panel #(
             hit2<=0;hit3<=0;border2<=0;border3<=0;
             selected2<=0;selected3<=0;text2<=0;pixel3<=0;gx2<=0;
         end else begin
-            px<=x-12'd336;py<=y-12'd614;
+            px<=x-12'd182;py<=y-12'd614;
             rgb1<=I_rgb;rgb2<=rgb1;rgb3<=rgb2;
             de_pipe<={de_pipe[2:0],I_de};hs_pipe<={hs_pipe[2:0],I_hs};
             vs_pipe<={vs_pipe[2:0],I_vs};
             hit2<=hit && I_panel_en && de_pipe[0];hit3<=hit2;
             border2<=border;border3<=border2;
-            selected2<=second==I_item;selected3<=selected2;
+            selected2<=card==I_item;selected3<=selected2;
             text2<=in_name || in_value;gx2<=gx;
             pixel3<=text2 && I_font_word[5'd31-gx2];
             if(!hit3) O_rgb<=rgb3;

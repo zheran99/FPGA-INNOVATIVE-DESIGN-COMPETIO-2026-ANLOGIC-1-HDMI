@@ -25,6 +25,7 @@ module logo_overlay #(
     input  wire [23:0] I_rgb,
 
     input  wire        I_en,           // 1 = 在 P6（允许叠加）
+    input wire [1:0] I_size, // 0=64, 1=128 (default), 2=256
     input  wire [1:0]  I_mode,         // 0=静止 1=弹移 2=消失
 
     // Logo ROM
@@ -63,8 +64,17 @@ module logo_overlay #(
     reg [10:0] logo_x, logo_y;
     reg [4:0]  vx, vy;                 // 有符号 5 位：bit4 = 负方向
 
-    localparam [10:0] X_MAX = H_ACTIVE - (W << SCNT);   // 1152
-    localparam [10:0] Y_MAX = V_ACTIVE - (W << SCNT);   // 592
+    reg [1:0] size_frame;
+    wire [10:0] display_size = size_frame==0 ? 11'd64 : size_frame==2 ? 11'd256 : 11'd128;
+    wire [10:0] x_max = H_ACTIVE - display_size;   // 1152
+    wire [10:0] y_max = V_ACTIVE - 72 - display_size;
+    wire [10:0] x_default = size_frame==0 ? X_DEF+64 : size_frame==2 ? X_DEF-128 : X_DEF;
+    wire [10:0] y_default = size_frame==0 ? Y_DEF+64 : size_frame==2 ? Y_DEF-128 : Y_DEF;
+    wire [1:0] requested_size = I_size==0 ? 2'd0 : I_size==2 ? 2'd2 : 2'd1;
+    always @(posedge I_clk or posedge I_rst) begin
+        if(I_rst) size_frame<=2'd1;
+        else if(frame_start) size_frame<=requested_size;
+    end   // 592
 
     wire       vx_neg = vx[4];
     wire [4:0] vx_mag = vx_neg ? (~vx + 5'd1) : vx;
@@ -75,10 +85,10 @@ module logo_overlay #(
     wire [11:0] my12 = {7'd0, vy_mag};
 
     wire x_lo = (logo_x < mx12);
-    wire x_hi = (logo_x + mx12 > X_MAX);
+    wire x_hi = (logo_x + mx12 > x_max);
     wire bounce_x = vx_neg ? x_lo : x_hi;
     wire y_lo = (logo_y < my12);
-    wire y_hi = (logo_y + my12 > Y_MAX);
+    wire y_hi = (logo_y + my12 > y_max);
     wire bounce_y = vy_neg ? y_lo : y_hi;
 
     wire [11:0] x_step = vx_neg ? (logo_x - vx_mag) : (logo_x + vx_mag);
@@ -92,10 +102,10 @@ module logo_overlay #(
             logo_y <= Y_DEF;
             vx     <= VX0;
             vy     <= VY0;
-        end else if (!moving) begin
+        end else if (!moving || (frame_start && requested_size!=size_frame)) begin
 
-            logo_x <= X_DEF;
-            logo_y <= Y_DEF;
+            logo_x <= frame_start ? (requested_size==0 ? X_DEF+64 : requested_size==2 ? X_DEF-128 : X_DEF) : x_default;
+            logo_y <= frame_start ? (requested_size==0 ? Y_DEF+64 : requested_size==2 ? Y_DEF-128 : Y_DEF) : y_default;
             vx     <= VX0;
             vy     <= VY0;
         end else if (frame_start) begin
@@ -110,11 +120,11 @@ module logo_overlay #(
     wire [11:0] lx = x_now - {1'b0, logo_x};
     wire [11:0] ly = y_now - {1'b0, logo_y};
 
-    localparam [11:0] DISP12 = W << SCNT;          // 上屏边长 = 128
+    wire [11:0] DISP12 = {1'b0,display_size};          // 上屏边长 = 128
     wire        in_rect_now = (lx < DISP12) && (ly < DISP12);
 
-    wire [AW-1:0] sx = lx[AW+SCNT-1:SCNT];
-    wire [AW-1:0] sy = ly[AW+SCNT-1:SCNT];
+    wire [AW-1:0] sx = size_frame==0 ? lx[AW-1:0] : size_frame==2 ? lx[AW+1:2] : lx[AW:1];
+    wire [AW-1:0] sy = size_frame==0 ? ly[AW-1:0] : size_frame==2 ? ly[AW+1:2] : ly[AW:1];
 
     assign O_rom_addr = {sy, sx};
 

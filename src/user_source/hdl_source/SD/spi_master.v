@@ -1,5 +1,7 @@
 module spi_master
 (
+    output idle,
+    output sample_valid,
 	input                       sys_clk,
 	input                       rst,
 	output                      nCS,       // chip select (SPI mode)
@@ -31,6 +33,10 @@ reg[4:0]                     clk_edge_cnt;
 assign MOSI = MOSI_shift[7];
 assign DCLK = DCLK_reg;
 assign data_out = MISO_shift;
+
+assign sample_valid=(state==DCLK_EDGE) &&
+    ((!CPHA && !clk_edge_cnt[0]) || (CPHA && clk_edge_cnt[0]));
+assign idle = (state == IDLE);
 assign wr_ack = (state == ACK);
 assign nCS = nCS_ctrl;
 always@(posedge sys_clk or posedge rst)

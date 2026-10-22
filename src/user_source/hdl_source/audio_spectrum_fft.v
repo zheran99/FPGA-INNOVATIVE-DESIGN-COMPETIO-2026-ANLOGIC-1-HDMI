@@ -94,7 +94,8 @@ module audio_spectrum_fft (
         end
     endfunction
     reg [7:0] levels [0:15];
-    wire [3:0] scan_band = band_for_bin(scan_bin);
+
+    reg [3:0] scan_band;
     wire [7:0] scan_height = height_for_magnitude(magnitude);
     genvar g;
     generate for (g=0; g<16; g=g+1) begin: pack_levels
@@ -116,7 +117,7 @@ module audio_spectrum_fft (
             prod_rr<=0; prod_ii<=0; prod_ri<=0; prod_ir<=0; rot_re<=0; rot_im<=0;
             tw_re<=0; tw_im<=0;
             abs_re_d<=0;abs_im_d<=0;magnitude<=0;scan_height_d<=0;scan_band_d<=0;
-            scan_select_d<=0;
+            scan_select_d<=0;scan_band<=0;
             scan_peak<=0;scan_new_band_d<=0;
         end else begin
             O_valid<=0;
@@ -154,7 +155,7 @@ module audio_spectrum_fft (
                         scan_bin<=1; state<=SCAN_READ;
                     end
                 end
-                SCAN_READ: state<=SCAN_USE;
+                SCAN_READ: begin scan_band<=band_for_bin(scan_bin); state<=SCAN_USE; end
                 SCAN_USE: begin
                     abs_re_d<=abs_re;abs_im_d<=abs_im;state<=SCAN_SUM;
                 end

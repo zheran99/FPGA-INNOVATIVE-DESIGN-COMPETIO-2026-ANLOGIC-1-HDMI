@@ -94,7 +94,7 @@ always @(posedge I_clk or posedge I_rst) begin
             O_audio_right_data <= 24'd0;
             O_audio_valid      <= 1'b1;
             O_underrun         <= 1'b1;
-            O_sample_cnt       <= O_sample_cnt + 32'd1;
+
             uc_pend            <= 1'b0;
         end
 

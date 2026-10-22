@@ -87,7 +87,7 @@ module afifo_32_32_1024 #(
             wr_bin_r  <= {PW{1'b0}};
             rd_used_r <= {(ADDR_WIDTH+1){1'b0}};
         end else begin
-            wr_bin_r  <= gray2bin(wr_gray_r1);   // 用 r1，少一级延迟
+            wr_bin_r  <= gray2bin(wr_gray_r2);
             rd_used_r <= wr_bin_r - rd_bin;
         end
     end
@@ -124,7 +124,7 @@ module afifo_32_32_1024 #(
         end else begin
             rd_gray_w1 <= rd_gray;
             rd_gray_w2 <= rd_gray_w1;
-            rd_bin_w   <= gray2bin(rd_gray_w1);     // 用 w1，少一级延迟
+            rd_bin_w   <= gray2bin(rd_gray_w2);
         end
     end
 

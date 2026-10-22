@@ -13,11 +13,14 @@ module p6_reg (
 
     // 设置输出
 
-    output reg  [1:0]  O_item,          // 当前选中的设置项 0..2
+    output reg  [2:0]  O_item,          // 当前选中的设置项 0..2
 
+    output reg [1:0] O_logo_size, // 0=64, 1=128, 2=256
     output reg  [1:0]  O_logo_sel,      // #0 标志：0=关 1=开(静止) 2=动(弹移)
     output reg         O_ad_on,         // #1 广告：0=关 1=开（左上角显示文字）
     output reg  [1:0]  O_ad_bg,         // #2 背景：0=无 1=半透 2=实底
+    output reg  [1:0]  O_ad_language,   // 0=中文 1=英文 2=双语
+    output reg         O_ad_layout,     // 0=左上 1=上方居中
 
     output reg         O_logo_en,       // 1 = 需要叠加 Logo（标志 != 关）
     output reg  [1:0]  O_logo_mode,
@@ -25,17 +28,20 @@ module p6_reg (
     output reg         O_changed,
 
     input  wire        I_u_wr,          // 1 拍写脉冲
-    input  wire [1:0]  I_u_sel,         // 0=LOGO
+    input  wire [2:0]  I_u_sel,         // 0=LOGO 1=开关 2=背景 3=语言 4=布局
     input  wire [1:0]  I_u_val,         // LOGO：0=关 1=开(静止) 2=动(弹移)
     input  wire        I_u_rst          // 恢复默认值
 );
 
     // 设置项编号
 
-    localparam [1:0] ITEM_LOGO = 2'd0,   // 标志
-                     ITEM_AD   = 2'd1,   // 广告
-                     ITEM_BG   = 2'd2,   // 背景
-                     ITEM_LAST = 2'd2;
+    localparam [2:0] ITEM_LOGO = 3'd0,
+                     ITEM_AD = 3'd1,
+                     ITEM_BG = 3'd2,
+                     ITEM_LANGUAGE = 3'd3,
+                     ITEM_LAYOUT = 3'd4,
+                     ITEM_SIZE = 3'd5,
+                     ITEM_LAST = 3'd5;
 
     localparam [1:0] AD_BG_NONE  = 2'd0,
                      AD_BG_HALF  = 2'd1,
@@ -71,6 +77,9 @@ module p6_reg (
             O_logo_sel  <= LOGO_SEL_DEF;
             O_ad_on     <= AD_ON_DEF;
             O_ad_bg     <= AD_BG_DEF;
+            O_logo_size <= 2'd1;
+            O_ad_language <= 2'd0;
+            O_ad_layout <= 1'b0;
             O_logo_en   <= (LOGO_SEL_DEF != LOGO_SEL_OFF);
             O_logo_mode <= (LOGO_SEL_DEF == LOGO_SEL_MOVE) ? 2'd1 : 2'd0;
             O_changed   <= 1'b0;
@@ -78,10 +87,10 @@ module p6_reg (
             O_changed <= 1'b0;                 // 默认清掉
 
             if (hop && !hop_back) begin
-                O_item    <= (O_item >= ITEM_LAST) ? ITEM_LOGO : O_item + 2'd1;
+                O_item    <= (O_item >= ITEM_LAST) ? ITEM_LOGO : O_item + 3'd1;
                 O_changed <= 1'b1;
             end else if (hop_back && !hop) begin
-                O_item    <= (O_item == ITEM_LOGO) ? ITEM_LAST : O_item - 2'd1;
+                O_item    <= (O_item == ITEM_LOGO) ? ITEM_LAST : O_item - 3'd1;
                 O_changed <= 1'b1;
             end
 
@@ -93,9 +102,13 @@ module p6_reg (
                                              : O_logo_sel + 2'd1;
                     ITEM_AD:   O_ad_on    <= ~O_ad_on;
 
-                    default:   O_ad_bg    <= (O_ad_bg >= AD_BG_SOLID)
+                    ITEM_BG:   O_ad_bg    <= (O_ad_bg >= AD_BG_SOLID)
                                              ? AD_BG_NONE
                                              : O_ad_bg + 2'd1;
+                    ITEM_LANGUAGE: O_ad_language <= O_ad_language>=2 ? 2'd0 : O_ad_language+2'd1;
+                    ITEM_LAYOUT: O_ad_layout <= ~O_ad_layout;
+                    ITEM_SIZE: O_logo_size <= O_logo_size>=2 ? 2'd0 : O_logo_size+2'd1;
+                    default: ;
                 endcase
             end
 
@@ -106,10 +119,25 @@ module p6_reg (
                 O_logo_sel  <= LOGO_SEL_DEF;
                 O_ad_on     <= AD_ON_DEF;
                 O_ad_bg     <= AD_BG_DEF;
+                O_logo_size <= 2'd1;
+            O_ad_language <= 2'd0;
+                O_ad_layout <= 1'b0;
                 O_logo_en   <= (LOGO_SEL_DEF != LOGO_SEL_OFF);
                 O_logo_mode <= (LOGO_SEL_DEF == LOGO_SEL_MOVE) ? 2'd1 : 2'd0;
             end
-            else if (I_u_wr && I_u_sel == 2'd1) begin
+            else if (I_u_wr && I_u_sel == 3'd5) begin
+                O_logo_size <= I_u_val>2 ? 2'd2 : I_u_val;
+                O_changed <= 1'b1;
+            end
+            else if (I_u_wr && I_u_sel == 3'd3) begin
+                O_ad_language <= (I_u_val > 2) ? 2'd2 : I_u_val;
+                O_changed <= 1'b1;
+            end
+            else if (I_u_wr && I_u_sel == 3'd4) begin
+                O_ad_layout <= (I_u_val != 0);
+                O_changed <= 1'b1;
+            end
+            else if (I_u_wr && I_u_sel == 3'd1) begin
                 O_ad_on <= I_u_val[0];
                 O_changed <= 1'b1;
             end

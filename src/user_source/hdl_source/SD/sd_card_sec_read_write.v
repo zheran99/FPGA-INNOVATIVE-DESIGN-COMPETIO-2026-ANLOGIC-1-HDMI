@@ -4,6 +4,7 @@ module sd_card_sec_read_write
 	parameter  SPI_HIGH_SPEED_DIV = 0
 )
 (
+    output init_ready,
 	input            clk,
 	input            rst,
 	output reg       sd_init_done,
@@ -54,6 +55,7 @@ localparam S_CMD16              = 18;
 
 reg[4:0]                       state;
 reg[31:0]                      sec_addr;
+assign init_ready = sd_init_done && state == S_WAIT_READ_WRITE;
 assign sd_sec_read_data_valid = (state == S_READ) && block_read_valid;
 assign sd_sec_read_data = block_read_data;
 assign sd_sec_read_end = (state == S_READ_END);
@@ -190,7 +192,7 @@ begin
 					sec_addr <= sd_sec_read_addr;
 				end
 
-				spi_clk_div <= 16'd0;
+				spi_clk_div <= SPI_HIGH_SPEED_DIV[15:0];
 			end
 			S_CMD24:
 			begin

@@ -12,7 +12,8 @@ module p7_reg (
     input wire I_u_rst,                 // 恢复默认值
 
     output reg O_wave_on,
-    output reg O_item,
+    output reg [1:0] O_item,
+    output reg O_visual_on,
     output reg O_horizontal
 );
 
@@ -24,17 +25,20 @@ module p7_reg (
 
     always @(posedge I_clk or negedge I_rst_n) begin
         if (!I_rst_n) begin
-            O_wave_on <= WAVE_ON_DEF; O_item <= 1'b0; O_horizontal <= HORZ_DEF;
+            O_visual_on<=1'b1; O_wave_on <= WAVE_ON_DEF; O_item <= 2'd0; O_horizontal <= HORZ_DEF;
         end else begin
             if (I_mode_oh[6]) begin
-                if (I_key_short[0] ^ I_key_short[2]) O_item <= ~O_item;
+                if (I_key_short[0] ^ I_key_short[2])
+                    O_item <= I_key_short[2] ? (O_item==2 ? 2'd0 : O_item+2'd1) : (O_item==0 ? 2'd2 : O_item-2'd1);
                 else if (I_key_short[1] && !I_key_short[0] && !I_key_short[2]) begin
                     if (!O_item) O_wave_on <= ~O_wave_on;
-                    else O_horizontal <= ~O_horizontal;
+                    else if(O_item==1) O_horizontal <= ~O_horizontal;
+                    else O_visual_on<=~O_visual_on;
                 end
             end
 
             if (I_u_rst) begin
+                O_visual_on <= 1'b1;
                 O_wave_on    <= WAVE_ON_DEF;
                 O_horizontal <= HORZ_DEF;
             end
@@ -42,6 +46,7 @@ module p7_reg (
                 case (I_u_sel)
                 P7_SEL_WAVE: O_wave_on    <= I_u_val[0];
                 P7_SEL_HORZ: O_horizontal <= I_u_val[0];
+                2'd2: O_visual_on <= I_u_val[0];
                 default: ;
                 endcase
             end

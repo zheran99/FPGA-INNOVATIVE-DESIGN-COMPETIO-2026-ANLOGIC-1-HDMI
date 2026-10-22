@@ -1238,20 +1238,20 @@ endmodule
 
 module p5_cn_font_rom (
     input  wire        clk,          // video_clk（同步读）
-    input  wire [5:0]  char_idx,     // 0..N-1（不是 Unicode 码值）
+    input  wire [6:0]  char_idx,     // 0..N-1（不是 Unicode 码值）
     input  wire [4:0]  row,
     output wire [31:0] rom_row       // 同步输出：地址后 1 拍有效
 );
 
-    localparam integer CN_N = 64;
+    localparam integer CN_N = 76;
 
     EG_LOGIC_BRAM #(
         .DATA_WIDTH_A  (32),
         .DATA_WIDTH_B  (32),
-        .ADDR_WIDTH_A  (11),
-        .ADDR_WIDTH_B  (11),
-        .DATA_DEPTH_A  (2048),
-        .DATA_DEPTH_B  (2048),
+        .ADDR_WIDTH_A  (12),
+        .ADDR_WIDTH_B  (12),
+        .DATA_DEPTH_A  (4096),
+        .DATA_DEPTH_B  (4096),
         .MODE          ("SP"),
         .REGMODE_A     ("NOREG"),   // 同步读、1 拍延迟（与原来的数组推断一致）
         .REGMODE_B     ("NOREG"),
@@ -1264,7 +1264,7 @@ module p5_cn_font_rom (
         .dia   (32'd0),
         .dib   (32'd0),
         .addra ({char_idx, row[4:0]}),
-        .addrb (11'd0),
+        .addrb (12'd0),
         .cea   (1'b1),
         .ceb   (1'b0),
         .wea   (1'b0),

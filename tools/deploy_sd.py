@@ -1183,18 +1183,21 @@ def deploy_main(argv=None):
     drive_letter_live = os.path.exists(root)
 
     if not drive_letter_live:
-        print(f"[!]  盘符 {letter}: 当前不可见（可能已被擦除/无文件系统）")
-        print(f"    -> 尝试裸设备访问 + diskpart 按卷号定位 ...")
-        raw_ok = False
-        try:
-            with RawDisk(letter, write=False) as _rd:
-                _rd.read(0, SECTOR_SIZE)
-            raw_ok = True
-            print(f"    [OK] 裸设备 \\\\.\\{letter}: 可访问 -> 卡在位，继续")
-        except Exception as e:
-            print(f"    [错误] 裸设备也不可访问: {e}")
-            print(f"       请检查： 卡插好了吗  盘符对不对（跑 --list）")
-            return 2
+        if args.dry_run:
+            print(f"[!]  盘符 {letter}: 当前不可见，按 16 GB 估算布局")
+        else:
+            print(f"[!]  盘符 {letter}: 当前不可见（可能已被擦除/无文件系统）")
+            print(f"    -> 尝试裸设备访问 + diskpart 按卷号定位 ...")
+            raw_ok = False
+            try:
+                with RawDisk(letter, write=False) as _rd:
+                    _rd.read(0, SECTOR_SIZE)
+                raw_ok = True
+                print(f"    [OK] 裸设备 \\\\.\\{letter}: 可访问 -> 卡在位，继续")
+            except Exception as e:
+                print(f"    [错误] 裸设备也不可访问: {e}")
+                print(f"       请检查： 卡插好了吗  盘符对不对（跑 --list）")
+                return 2
 
     dt = _k32.GetDriveTypeW(root)
     free = ctypes.c_ulonglong(0); total = ctypes.c_ulonglong(0)
@@ -1482,21 +1485,23 @@ def deploy_main(argv=None):
 # 文本打包
 
 TEXT_MAGIC = b"FTXT"
-TEXT_VERSION = 1
+TEXT_VERSION = 2
 TEXT_CUE_N = 64
 TEXT_SCH_N = 1024
-TEXT_LN_N = 64
-TEXT_ACH_N = 1024
+TEXT_LN_N = 128
+TEXT_ACH_N = 2048
 TEXT_OFF_CUE = 16
 TEXT_OFF_SCH = TEXT_OFF_CUE + 512
 TEXT_OFF_LN = TEXT_OFF_SCH + 1024
-TEXT_OFF_ACH = TEXT_OFF_LN + 128
-TEXT_OFF_END = TEXT_OFF_ACH + 1024
+TEXT_OFF_ACH = TEXT_OFF_LN + 512
+TEXT_OFF_END = TEXT_OFF_ACH + 2048
 TEXT_RATE = 48000
 TEXT_SAMPLES_PER_FRAME = 792
 TEXT_ASCII_FIRST, TEXT_ASCII_LAST = 0x20, 0x7E
+TEXT_AD_SLOTS = 8
 TEXT_AD_LINES = 4
-TEXT_AD_COLS = 64
+TEXT_AD_COLS = 48
+TEXT_AD_COLS_CN = 26
 
 # 广告字库收录的字符，顺序必须与 ad_cn_font_lo/hi.mif 一致（索引即字形槽位）
 TEXT_AD_CHARSET = (
@@ -1584,7 +1589,8 @@ def wrap_ad(text):
         seg = " ".join(seg.split())
         if not seg:
             continue
-        lines.extend(textwrap.wrap(seg, width=TEXT_AD_COLS,
+        wide = any(ord(c) > 0x7F for c in seg)
+        lines.extend(textwrap.wrap(seg, width=TEXT_AD_COLS_CN if wide else TEXT_AD_COLS,
                                    break_long_words=True,
                                    break_on_hyphens=False))
     return lines or [""]
@@ -1594,9 +1600,9 @@ def ad_tables(ad_path):
     texts = parse_ad_lines(ad_path)
     if not texts:
         raise ValueError("advertisement.txt 里没有有效行")
-    if len(texts) > TEXT_LN_N // TEXT_AD_LINES:
+    if len(texts) > TEXT_LN_N // TEXT_AD_SLOTS:
         raise ValueError(f"广告文案 {len(texts)} 条，最多 "
-                         f"{TEXT_LN_N // TEXT_AD_LINES} 条（每条对应一张图）")
+                         f"{TEXT_LN_N // TEXT_AD_SLOTS} 条（每条对应一张图）")
 
     missing = {}
     for idx, text in enumerate(texts, 1):
@@ -1614,17 +1620,17 @@ def ad_tables(ad_path):
         if len(lines) > TEXT_AD_LINES:
             raise ValueError(f"第 {idx + 1} 条折行后 {len(lines)} 行，"
                              f"最多 {TEXT_AD_LINES} 行")
-        for ln in range(TEXT_AD_LINES):
-            if ln < len(lines):
-                entries.append((len(stream), len(lines[ln])))
-                stream.extend(TEXT_AD_CHARSET.index(c) for c in lines[ln])
+        for slot in range(TEXT_AD_SLOTS):
+            if slot < len(lines):
+                entries.append((len(stream), len(lines[slot])))
+                stream.extend(TEXT_AD_CHARSET.index(c) for c in lines[slot])
             else:
                 entries.append((len(stream), 0))
 
     if len(stream) > TEXT_ACH_N:
         raise ValueError(f"广告字符 {len(stream)} 个，超过上限 {TEXT_ACH_N}")
     for off, ln in entries:
-        if off > 0x3FF or ln > 0x3F:
+        if off > 0x7FF or ln > 0x3F:
             raise ValueError(f"广告行偏移或长度越界（{off}, {ln}）")
     return entries, stream, texts
 
@@ -1653,9 +1659,13 @@ def build_text_blob(ad_path, lrc_path, wav_info):
     buf[TEXT_OFF_SCH:TEXT_OFF_SCH + len(chars)] = chars.encode("ascii")
 
     for i in range(TEXT_LN_N):
-        val = (entries[i][1] << 10) | entries[i][0] if i < len(entries) else 0
-        pos = TEXT_OFF_LN + i * 2
-        buf[pos:pos + 2] = struct.pack("<H", val)
+        if i < len(entries):
+            off, ln = entries[i]
+            val = ((ln & 0x3F) << 11) | (off & 0x7FF)
+        else:
+            val = 0
+        pos = TEXT_OFF_LN + i * 4
+        buf[pos:pos + 4] = struct.pack("<I", val)
 
     for i, code in enumerate(stream):
         buf[TEXT_OFF_ACH + i] = code

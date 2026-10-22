@@ -5,5 +5,6 @@
 `define   ROW_WIDTH                        11
 `define   BA_WIDTH                        2
 
-`define	  SDR_CLK_PERIOD				1000000000/125000000
-`define   SELF_REFRESH_INTERVAL			64000000/`SDR_CLK_PERIOD/2**(`ROW_WIDTH)
+`define	  SDR_CLK_PERIOD				(1000000000/125000000)
+
+`define   SELF_REFRESH_INTERVAL			((64000000/`SDR_CLK_PERIOD/(2**(`ROW_WIDTH))) - 1)

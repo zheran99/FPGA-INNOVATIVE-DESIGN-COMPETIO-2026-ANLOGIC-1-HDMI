@@ -30,6 +30,7 @@ module wav_read(
     input  [7:0]                sd_sec_read_data,
     input                       sd_sec_read_data_valid,
     input                       sd_sec_read_end,
+    input sd_sec_error, recovery_hold,
 
     // 背压
     input                       fifo_almost_full,
@@ -108,13 +109,14 @@ wire cid_is_data_p = (cid[31:8] == 24'h646174);   // "dat"
 
 reg [1:0]  byte_idx;
 reg [15:0] l16, r16;
-reg [31:0] data_byte_cnt;
+reg [31:0] data_bytes_left;
+reg        data_has_size;
 reg [31:0] data_skip_rem;     // 首扇区文件头剩余跳过量
 wire       mono = (f_channels == 16'd1);
 
 wire byte_in = sd_sec_read_data_valid;
 
-wire data_done      = (data_size != 32'd0) && (data_byte_cnt >= data_size);
+reg data_done;
 wire can_start_read = (~fifo_almost_full) && (~data_done);
 
 assign ready         = (state == S_IDLE);
@@ -125,9 +127,9 @@ assign o_data_size   = data_size;
 assign o_data_offset = data_offset;
 
 reg sd_read_command;
-assign sd_sec_read=sd_read_command && !rst;
+assign sd_sec_read=sd_read_command && !rst && !recovery_hold;
 reg pcm_write_command;
-assign pcm_wr_en=pcm_write_command && !rst;
+assign pcm_wr_en=pcm_write_command && !rst && !sd_sec_error && !recovery_hold;
 
 reg riff_hit_r;
 wire addr_scan_start = state==S_IDLE && scan_start;
@@ -149,7 +151,7 @@ wire [31:0] addr_value = ({32{addr_scan_start}} & scan_start_sector) |
 
 always @(posedge clk) begin
     if(rst) sd_sec_read_addr<=0;
-    else if(!sd_init_done || addr_update)
+    else if(!sd_init_done || (addr_update && !sd_sec_error && !recovery_hold))
         sd_sec_read_addr<=sd_init_done ? addr_value : 32'd0;
 end
 
@@ -181,6 +183,12 @@ always @(posedge clk) begin
         eof               <= 1'b0;
         hdr_go            <= 1'b0;
         data_go           <= 1'b0;
+    end else if (sd_sec_error || recovery_hold) begin
+
+        sd_read_command <= 1'b0;
+        scan_found_valid <= 1'b0;
+        hdr_go <= 1'b0;
+        data_go <= 1'b0;
     end else begin
         scan_found_valid <= 1'b0;
         hdr_go           <= 1'b0;      // 默认收回脉冲
@@ -497,16 +505,22 @@ always @(posedge clk) begin
     if (rst) begin
         l16           <= 16'd0;
         r16           <= 16'd0;
-        data_byte_cnt <= 32'd0;
+        data_bytes_left <= 32'd0;
+        data_has_size <= 1'b0;
+        data_done <= 1'b0;
         pcm_write_command     <= 1'b0;
         pcm_lr        <= 48'd0;
     end else if (!sd_init_done) begin
-        data_byte_cnt <= 32'd0;
+        data_bytes_left <= 32'd0;
+        data_has_size <= 1'b0;
+        data_done <= 1'b0;
         pcm_write_command     <= 1'b0;
     end else if (data_go) begin
         l16           <= 16'd0;
         r16           <= 16'd0;
-        data_byte_cnt <= 32'd0;
+        data_bytes_left <= data_size;
+        data_has_size <= (data_size != 32'd0);
+        data_done <= 1'b0;
         pcm_write_command     <= 1'b0;
     end else begin
         pcm_write_command <= 1'b0;               // 默认收回脉冲
@@ -537,7 +551,9 @@ always @(posedge clk) begin
                 end
                 default: ;
             endcase
-            data_byte_cnt <= data_byte_cnt + 32'd1;
+            data_bytes_left <= data_bytes_left - 32'd1;
+            if (data_has_size && data_bytes_left == 32'd1)
+                data_done <= 1'b1;
         end
     end
 end

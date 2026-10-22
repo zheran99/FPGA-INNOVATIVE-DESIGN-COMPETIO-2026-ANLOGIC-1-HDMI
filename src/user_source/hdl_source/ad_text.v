@@ -1,175 +1,110 @@
-`timescale 1ns / 1ps
+`timescale 1ns/1ps
 
 module ad_text #(
-    parameter H_ACTIVE = 1280,
-    parameter V_ACTIVE = 720,
-
-    parameter X0      = 16,     // 文字左上角
-    parameter Y0      = 16,
-    parameter GLYPH_W = 16,     // 字形宽（位）
-    parameter GLYPH_H = 16,     // 字形高（行）
-    parameter PITCH   = 16,     // 字距 = 字形宽（16 = 2^4 取列只用位选）
-
-    parameter MAX_COLS  = 64,   // 每行最多字符数（col 6 位）
-    parameter MAX_LINES = 4,    // 最多行数（line 2 位）
-
-    // 配色
-    parameter [23:0] C_TXT      = 24'hFFFFFF,   // 文字：白
-                     C_BG_SOLID = 24'h000000    // 背景=实底：黑条
+    parameter H_ACTIVE=1280, V_ACTIVE=720,
+    parameter X0=24, Y0=32, GLYPH_W=16, GLYPH_H=16,
+    parameter PITCH=16, MAX_COLS=48, MAX_LINES=8,
+    parameter [23:0] C_TXT=24'hFFFFFF, C_BG_SOLID=24'h000000
 )(
-    input  wire        I_clk,          // video_clk
-    input  wire        I_rst,
-
-    input  wire        I_de,
-    input  wire        I_hs,
-    input  wire        I_vs,
-    input  wire [23:0] I_rgb,
-
-    input  wire        I_en,           // 1 = 显示广告文字（P6 的「广告」开关）
-    input  wire [1:0]  I_bg,           // 0=无背景 1=半透 2=实底
-    input  wire [4:0]  I_img,          // 图片序号 1..9（随切图变化）；
-
-    input  wire        I_txt_wr_clk,
-    input  wire        I_txt_wr_en,
-    input  wire [5:0]  I_txt_wr_addr,
-    input  wire [15:0] I_txt_wr_data,
-    input  wire        I_ach_wr_en,
-    input  wire [9:0]  I_ach_wr_addr,
-    input  wire [7:0]  I_ach_wr_data,
-
-    output wire        O_de,           // 已延迟 5 拍
-    output wire        O_hs,
-    output wire        O_vs,
-    output wire [23:0] O_rgb
+    input wire I_clk,I_rst,I_de,I_hs,I_vs,
+    input wire [23:0] I_rgb,
+    input wire I_en, input wire [1:0] I_bg, input wire [4:0] I_img,
+    input wire [1:0] I_language, input wire I_layout, input wire I_monitor,
+    input wire I_txt_wr_clk,I_txt_wr_en,
+    input wire [6:0] I_txt_wr_addr, input wire [16:0] I_txt_wr_data,
+    input wire I_ach_wr_en, input wire [10:0] I_ach_wr_addr,
+    input wire [7:0] I_ach_wr_data,
+    output wire O_de,O_hs,O_vs, output wire [23:0] O_rgb
 );
-
-    wire [3:0] img_sel = I_img[3:0] - 4'd1;
-
-    // 输入打 1 拍
-
-    reg        de_d1, hs_d1, vs_d1;
+    reg vs_prev,en_frame,layout_frame,monitor_frame;
+    reg [1:0] language_frame,bg_frame;
+    reg [4:0] img_frame;
+    always @(posedge I_clk or posedge I_rst) begin
+        if(I_rst) begin
+            vs_prev<=0;en_frame<=0;layout_frame<=0;monitor_frame<=0;
+            language_frame<=0;bg_frame<=1;img_frame<=0;
+        end else begin
+            vs_prev<=I_vs;
+            if(I_vs && !vs_prev) begin
+                en_frame<=I_en;bg_frame<=I_bg;img_frame<=I_img;
+                language_frame<=(I_language>2) ? 2'd0 : I_language;
+                layout_frame<=I_layout;monitor_frame<=I_monitor;
+            end
+        end
+    end
+    wire [3:0] img_sel=img_frame[3:0]-4'd1;
+    wire [11:0] x_now,y_now;
+    osd_position #(.H_ACTIVE(H_ACTIVE),.V_ACTIVE(V_ACTIVE)) u_pos(
+        .clk(I_clk),.rst(I_rst),.de(I_de),.vs(I_vs),.x(x_now),.y(y_now),.pos_vld());
+    localparam CENTER_X=(H_ACTIVE-416)/2;
+    wire [11:0] origin_x=layout_frame ? CENTER_X : X0;
+    wire [11:0] origin_y=(!layout_frame && monitor_frame) ? 12'd144 : Y0;
+    reg [11:0] x_d1,y_d1;
+    reg de_d1,hs_d1,vs_d1;
     reg [23:0] rgb_d1;
     always @(posedge I_clk or posedge I_rst) begin
-        if (I_rst) begin
-            de_d1 <= 1'b0; hs_d1 <= 1'b0; vs_d1 <= 1'b0; rgb_d1 <= 24'd0;
-        end else begin
-            de_d1 <= I_de; hs_d1 <= I_hs; vs_d1 <= I_vs; rgb_d1 <= I_rgb;
+        if(I_rst) begin x_d1<=0;y_d1<=0;de_d1<=0;hs_d1<=0;vs_d1<=0;rgb_d1<=0;end
+        else begin
+            x_d1<=x_now-origin_x;y_d1<=y_now-origin_y;
+            de_d1<=I_de;hs_d1<=I_hs;vs_d1<=I_vs;rgb_d1<=I_rgb;
         end
     end
 
-    wire [11:0] x_now, y_now;
-    osd_position #(
-        .H_ACTIVE (H_ACTIVE),
-        .V_ACTIVE (V_ACTIVE)
-    ) u_pos (
-        .clk     (I_clk),
-        .rst     (I_rst),
-        .de      (I_de),
-        .vs      (I_vs),
-        .x       (x_now),
-        .y       (y_now),
-        .pos_vld (        )
-    );
-
-    reg [11:0] x_d1, y_d1;
-    always @(posedge I_clk or posedge I_rst) begin
-        if (I_rst) begin
-            x_d1 <= 12'd0; y_d1 <= 12'd0;
-        end else begin
-            x_d1 <= x_now - X0;
-            y_d1 <= y_now - Y0;
-        end
-    end
-
-    wire [7:0] col   = x_d1[11:4];
-    wire [3:0] gx    = x_d1[3:0];     // 字形内列
-
-    wire [1:0] line  = y_d1[5:4];     // 行号 0..3（= y_d1 / 16）
-    wire [3:0] gy    = y_d1[3:0];     // 字形内行（行高 16 = 2^4）
-
-    wire       in_block = ~|y_d1[11:6];
-
+    wire [11:0] text_x=x_d1-12'd16;
+    wire compact=language_frame==2;
+    wire [2:0] row=compact ? (y_d1<32 ? 3'd0 : y_d1<56 ? 3'd1 : y_d1<80 ? 3'd2 :
+        y_d1<104 ? 3'd3 : y_d1<128 ? 3'd4 : y_d1<152 ? 3'd5 : 3'd6) : y_d1[7:5];
+    wire [7:0] row_origin=row==0 ? 8'd0 : row==1 ? 8'd32 : row==2 ? 8'd56 : row==3 ? 8'd80 :
+        row==4 ? 8'd104 : row==5 ? 8'd128 : 8'd152;
+    wire [7:0] row_y=compact ? y_d1[7:0]-row_origin : {3'd0,y_d1[4:0]};
+    wire english=(language_frame==1 && row!=0) || (language_frame==2 && row>=4);
+    wire ascii_row=(row==0) || english;
+    wire [2:0] line=(language_frame==1 && row!=0) ? row+3'd3 : row;
+    wire [8:0] col=ascii_row ? text_x[11:3] : {1'b0,text_x[11:4]};
+    wire [3:0] gx=ascii_row ? {1'b0,text_x[2:0]}+4'd4 : text_x[3:0];
+    wire [3:0] gy=row_y[3:0]-4'd8;
+    wire [3:0] rows=(language_frame==0) ? 4'd3 : (language_frame==1) ? 4'd4 : 4'd7;
+    wire in_block=(y_d1<(compact ? 12'd176 : {3'd0,rows,5'd0})) && x_d1<416;
+    wire ink_row=row_y>=8 && row_y<24;
     wire [7:0] tbl_code;
     wire [5:0] tbl_len;
-    ad_str_tbl u_str (
-        .clk(I_clk),
-        .img  (img_sel),
-        .line (line),                 // 表只有 2 位行号
-        .col  (col[5:0]),             // 表只有 6 位列
-        .code (tbl_code),
-        .len  (tbl_len),
-
-        .I_wr_clk    (I_txt_wr_clk),
-        .I_wr_en     (I_txt_wr_en),
-        .I_wr_addr   (I_txt_wr_addr),
-        .I_wr_data   (I_txt_wr_data),
-        .I_ch_wr_en  (I_ach_wr_en),
-        .I_ch_wr_addr(I_ach_wr_addr),
-        .I_ch_wr_data(I_ach_wr_data)
-    );
-
-    wire [10:0] len_w = {tbl_len, 4'b0000};
-
-    wire in_cell = (x_d1 < {1'b0, len_w}) && (in_block);
-
-    reg de_q,hs_q,vs_q,incell_q;
-    reg [1:0] bg_q;
+    wire text_ready;
+    ad_str_tbl u_str(.clk(I_clk),.rst(I_rst),.blank(I_vs && !I_de),
+        .img(img_sel),.line(line),.col(col[5:0]),.code(tbl_code),.len(tbl_len),.ready(text_ready),
+        .I_wr_clk(I_txt_wr_clk),.I_wr_en(I_txt_wr_en),.I_wr_addr(I_txt_wr_addr),.I_wr_data(I_txt_wr_data),
+        .I_ch_wr_en(I_ach_wr_en),.I_ch_wr_addr(I_ach_wr_addr),.I_ch_wr_data(I_ach_wr_data));
+    wire in_cell=in_block && text_ready && en_frame && img_frame>=1 && img_frame<=9;
+    wire in_ink=in_cell && ink_row && col<{3'd0,tbl_len};
+    reg de_q,hs_q,vs_q,incell_q,ink_q;
     reg [23:0] rgb_q;
+    reg [1:0] bg_q;
     reg [3:0] gx_q,gy_q;
-    always @(posedge I_clk or posedge I_rst)begin
-        if(I_rst)begin de_q<=0;hs_q<=0;vs_q<=0;rgb_q<=0;incell_q<=0;gx_q<=0;gy_q<=0;bg_q<=0;end
+    always @(posedge I_clk or posedge I_rst) begin
+        if(I_rst) begin de_q<=0;hs_q<=0;vs_q<=0;rgb_q<=0;incell_q<=0;ink_q<=0;gx_q<=0;gy_q<=0;bg_q<=0;end
         else begin
             de_q<=de_d1;hs_q<=hs_d1;vs_q<=vs_d1;rgb_q<=rgb_d1;
-            incell_q<=in_cell & I_en & (I_img>=1 && I_img<=9);
-            gx_q<=gx;gy_q<=gy;bg_q<=I_bg;
+            incell_q<=in_cell;ink_q<=in_ink;gx_q<=gx;gy_q<=gy;bg_q<=bg_frame;
         end
     end
-
-    wire [7:0] font_idx = tbl_code;
-    wire [3:0] font_row = gy_q;
-
-    reg        de_d2, hs_d2, vs_d2;
-    reg [23:0] rgb_d2;
-    reg        incell_d2;
-    reg [3:0]  gx_d2;
-
-    always @(posedge I_clk or posedge I_rst) begin
-        if (I_rst) begin
-            de_d2 <= 1'b0; hs_d2 <= 1'b0; vs_d2 <= 1'b0; rgb_d2 <= 24'd0;
-            incell_d2 <= 1'b0; gx_d2 <= 4'd0;
-        end else begin
-            de_d2 <= de_q; hs_d2 <= hs_q; vs_d2 <= vs_q; rgb_d2 <= rgb_q;
-            incell_d2 <= incell_q;     // 总开关在这里门控
-            gx_d2 <= gx_q;
-        end
-    end
-
     wire [15:0] font_word;
-    ad_font_rom u_font (
-        .clk      (I_clk),
-        .char_idx (font_idx),          // D2 拍地址
-        .row      (font_row),          // D2 拍地址
-        .rom_row  (font_word)          // D3 拍数据（与 gx_d2 同拍）
-    );
-
-    wire [3:0] bit_sel = 4'd15 - gx_d2;
-    wire       pix_bit = font_word[bit_sel];
-
-    reg        de_d3, hs_d3, vs_d3;
-    reg [23:0] rgb_d3;
-    reg        cell_d3, txt_d3;
-
+    ad_font_rom u_font(.clk(I_clk),.char_idx(tbl_code),.row(gy_q),.rom_row(font_word));
+    reg de_d2,hs_d2,vs_d2,incell_d2,ink_d2;
+    reg [23:0] rgb_d2;
+    reg [3:0] gx_d2;
+    reg [1:0] bg_d2,bg_d3;
     always @(posedge I_clk or posedge I_rst) begin
-        if (I_rst) begin
-            de_d3 <= 1'b0; hs_d3 <= 1'b0; vs_d3 <= 1'b0; rgb_d3 <= 24'd0;
-            cell_d3 <= 1'b0; txt_d3 <= 1'b0;
-        end else begin
-            de_d3 <= de_d2; hs_d3 <= hs_d2; vs_d3 <= vs_d2; rgb_d3 <= rgb_d2;
-            cell_d3 <= incell_d2;
-            txt_d3  <= incell_d2 & pix_bit;
-        end
+        if(I_rst) begin de_d2<=0;hs_d2<=0;vs_d2<=0;rgb_d2<=0;incell_d2<=0;ink_d2<=0;gx_d2<=0;bg_d2<=0;end
+        else begin de_d2<=de_q;hs_d2<=hs_q;vs_d2<=vs_q;rgb_d2<=rgb_q;
+            incell_d2<=incell_q;ink_d2<=ink_q;gx_d2<=gx_q;bg_d2<=bg_q;end
     end
-
+    wire pix_bit=font_word[4'd15-gx_d2];
+    reg de_d3,hs_d3,vs_d3,cell_d3,txt_d3;
+    reg [23:0] rgb_d3;
+    always @(posedge I_clk or posedge I_rst) begin
+        if(I_rst) begin de_d3<=0;hs_d3<=0;vs_d3<=0;rgb_d3<=0;cell_d3<=0;txt_d3<=0;bg_d3<=0;end
+        else begin de_d3<=de_d2;hs_d3<=hs_d2;vs_d3<=vs_d2;rgb_d3<=rgb_d2;
+            cell_d3<=incell_d2;txt_d3<=ink_d2 && pix_bit;bg_d3<=bg_d2;end
+    end
     wire [15:0] b60_r = {1'd0, rgb_d3[23:16], 7'd0} + {4'd0, rgb_d3[23:16], 4'd0}
                       + {5'd0, rgb_d3[23:16], 3'd0} + {7'd0, rgb_d3[23:16], 1'd0};
     wire [15:0] b60_g = {1'd0, rgb_d3[15:8],  7'd0} + {4'd0, rgb_d3[15:8],  4'd0}
@@ -179,8 +114,8 @@ module ad_text #(
     wire [23:0] bg_mix = {b60_r[15:8],               // R × 60%
                           b60_g[15:8],               // G × 60%
                           b60_b[15:8]};              // B × 60%
-    wire [23:0] bg_col = (bg_q == 2'd2) ? C_BG_SOLID : bg_mix;
-    wire        bg_on  = (bg_q != 2'd0) & cell_d3;
+    wire [23:0] bg_col = (bg_d3 == 2'd2) ? C_BG_SOLID : bg_mix;
+    wire        bg_on  = (bg_d3 != 2'd0) & cell_d3;
 
     reg [23:0] comp;
     always @(*) begin

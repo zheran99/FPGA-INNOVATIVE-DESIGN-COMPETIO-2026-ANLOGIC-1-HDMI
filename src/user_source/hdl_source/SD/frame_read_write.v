@@ -14,6 +14,8 @@ module frame_read_write
 	parameter PIX_PER_WORD           = 1
 )
 (
+    input refresh_admission_block,
+    input abort_write, output abort_ack,
 	input                            rst,
 	input                            mem_clk,
 	input							 Sdr_init_done,
@@ -184,10 +186,12 @@ frame_fifo_write
 )
 frame_fifo_write_m0
 (
+    .abort_write(abort_write), .abort_ack(abort_ack),
 	.rst                        (rst                      ),
 	.mem_clk                    (mem_clk                  ),
     .Sdr_init_done				(Sdr_init_done),
 	.Sdr_init_ref_vld			(Sdr_init_ref_vld),
+    .refresh_admission_block(refresh_admission_block),
     .Sdr_busy					(Sdr_busy),
 	.App_rd_busy				(App_rd_busy),
     .O_wr_busy					(O_wr_busy),
@@ -255,6 +259,7 @@ frame_fifo_read_m0
 	.mem_clk                    (mem_clk                  ),
     .Sdr_init_done				(Sdr_init_done),
 	.Sdr_init_ref_vld			(Sdr_init_ref_vld),
+    .refresh_admission_block(refresh_admission_block),
     .Sdr_busy					(Sdr_busy),
     .Sdr_rd_en					(Sdr_rd_en),
 	.App_wr_busy				(App_wr_busy),
@@ -295,6 +300,7 @@ frame_fifo_read_m1
 	.mem_clk                    (mem_clk                  ),
     .Sdr_init_done				(Sdr_init_done),
 	.Sdr_init_ref_vld			(Sdr_init_ref_vld),
+    .refresh_admission_block(refresh_admission_block),
     .Sdr_busy					(Sdr_busy),
     .Sdr_rd_en					(Sdr_rd_en),
 	.App_wr_busy				(App_wr_busy),

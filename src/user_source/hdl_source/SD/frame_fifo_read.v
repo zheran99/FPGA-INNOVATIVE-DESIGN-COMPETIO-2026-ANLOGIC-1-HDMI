@@ -8,6 +8,7 @@ module frame_fifo_read
 	parameter FIFO_DEPTH             = 512,
 	parameter BURST_SIZE             = 128)
 (
+    input refresh_admission_block,
 	input                            rst,
 	input                            mem_clk,
 	input							 Sdr_init_done,
@@ -83,7 +84,7 @@ assign App_rd_addr = {App_rd_addr_r[ADDR_BITS - 1:0]};
 assign rd_vld = (state == S_READ_BURST && burst_cnt >= BURST_SIZE);
 
 wire rd_about_to_burst = (state == S_CHECK_FIFO) &&
-                         (read_req_d2 != 1'b1) &&
+                         (read_req_d2 != 1'b1) && !refresh_admission_block &&
                          (wrusedw < (FIFO_DEPTH - BURST_SIZE));
 
 assign O_rd_busy = (state == S_READ_BURST) || rd_about_to_burst;
@@ -255,7 +256,7 @@ begin
 					state <= S_ACK;
 				end
 
-		else if(wrusedw < (FIFO_DEPTH - BURST_SIZE) && ~App_wr_busy && ~rd_peer_busy)
+		else if(wrusedw < (FIFO_DEPTH - BURST_SIZE) && ~App_wr_busy && ~rd_peer_busy && !refresh_admission_block)
 				begin
 					state <= S_READ_BURST;
 

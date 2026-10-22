@@ -5,6 +5,7 @@
 `include "../user_source/hdl_source/include/global_def.v"
 
 module sdram(
+    output refresh_admission_block,
     `ifdef SIMULATION
 	output					SDRAM_CLK,
 	output					SDR_CKE,
@@ -46,7 +47,13 @@ wire  [`DATA_WIDTH-1:0]	SDR_DQ ;
 wire  [`DM_WIDTH-1:0]	SDR_DM;
 `endif
 
-sdr_as_ram  #( .self_refresh_open(1'b1))
+wire refresh_request;
+sdram_refresh_guard refresh_guard(
+    .clk(Clk), .rst(Rst), .init_done(Sdr_init_done),
+    .app_active(App_wr_en | App_rd_en), .refresh_active(Sdr_init_ref_vld),
+    .refresh_command(!SDR_RAS && !SDR_CAS && SDR_WE),
+    .admission_block(refresh_admission_block), .refresh_request(refresh_request));
+sdr_as_ram  #( .self_refresh_open(1'b0))
 	u2_ram(
 		.Sdr_clk(Clk),
 		.Sdr_clk_sft(Clk_sft),
@@ -56,7 +63,7 @@ sdr_as_ram  #( .self_refresh_open(1'b1))
 		.Sdr_init_ref_vld(Sdr_init_ref_vld),
 		.Sdr_busy(Sdr_busy),
 
-		.App_ref_req(1'b0),
+		.App_ref_req(refresh_request),
 
         .App_wr_en(App_wr_en),
         .App_wr_addr(App_wr_addr),

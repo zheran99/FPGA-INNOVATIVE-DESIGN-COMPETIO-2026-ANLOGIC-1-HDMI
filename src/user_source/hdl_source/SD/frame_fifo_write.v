@@ -12,6 +12,8 @@ module frame_fifo_write
 	parameter PIX_PER_WORD           = 1
 )
 (
+    input refresh_admission_block,
+    input abort_write, output abort_ack,
 	input                            rst,
 	input                            mem_clk,
 	input							 Sdr_init_done,
@@ -83,7 +85,7 @@ reg App_wr_en_d0;
 
 wire into_burst;
 
-assign into_burst = (({1'b0, rdusedw} >= wr_remain_r) || rdusedw > BURST_SIZE) && ~App_rd_busy;// 当rd在突发时不会进入burst
+assign into_burst = (({1'b0, rdusedw} >= wr_remain_r) || rdusedw > BURST_SIZE) && ~App_rd_busy && !refresh_admission_block && !abort_write;// 当rd在突发时不会进入burst
 
 wire [ADDR_BITS:0] wr_remain_d = {1'b0, write_len_latch} - {1'b0, write_cnt};
 wire               wr_remain_over = |wr_remain_d[ADDR_BITS:11];
@@ -124,12 +126,19 @@ begin
 	end
 end
 
+reg [3:0] abort_quiet;
+always @(posedge mem_clk or posedge rst) begin
+    if(rst) abort_quiet<=0;
+    else if(!abort_write || O_wr_busy || App_wr_en || !fifo_aclr) abort_quiet<=0;
+    else if(abort_quiet!=15) abort_quiet<=abort_quiet+1'b1;
+end
+assign abort_ack=abort_write && abort_quiet==15;
 assign wr_cnt_err   = dbg_wr_cnt_err;
 assign wr_last_addr = dbg_wr_last_addr;
 
 assign O_wr_busy = (state == S_WRITE_BURST || (state == S_CHECK_FIFO && into_burst));// 在突发，或者将要突发，则显示busy
 assign wr_burst_finish = (burst_cnt >= BURST_SIZE);
-assign write_finish = (state == S_END) ? 1'b1 : 1'b0;
+assign write_finish = (state == S_END) && !abort_write;
 assign App_wr_en = App_wr_en_d0;
 
 always@(posedge mem_clk or posedge rst)
@@ -228,8 +237,11 @@ begin
 		write_req_ack <= 1'b0;
 
 	end
-	else
-		case(state)
+    else if (abort_write && state != S_WRITE_BURST && !App_wr_en_r && !App_wr_en_d0) begin
+        state <= S_IDLE; App_wr_en_r <= 0; write_req_ack <= 0;
+        fifo_aclr <= 1; write_cnt <= 0;
+    end else
+        case(state)
 
 			S_IDLE:
 			begin
@@ -238,6 +250,7 @@ begin
 					state <= S_ACK;
 				end
 				write_req_ack <= 1'b0;
+                fifo_aclr <= 0;
 			end
 
 			S_ACK:

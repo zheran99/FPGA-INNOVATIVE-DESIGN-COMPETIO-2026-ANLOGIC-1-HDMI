@@ -19,6 +19,7 @@ module subtitle_engine #(
 
     // 时间基
 
+    parameter integer LOOP_SAMPLE_COUNT = 0,
     parameter SAMPLES_PER_FRAME = 792,   // 黄金常数（48kHz / 60.606fps）
 
     parameter TYPE_RATE  = 1,
@@ -81,7 +82,13 @@ module subtitle_engine #(
     reg [9:0]  acc;        // 帧内样本偏移 0..791
     reg [23:0] frame_q;    // 帧号（寄存）
 
-    wire song_restart = I_loop_pulse | (frame_q > I_loop_frame);
+    localparam integer LOOP_LAST_FRAME = LOOP_SAMPLE_COUNT > 0 ?
+        (LOOP_SAMPLE_COUNT - 1) / SAMPLES_PER_FRAME : 0;
+    localparam [9:0] LOOP_LAST_SAMPLE = LOOP_SAMPLE_COUNT > 0 ?
+        (LOOP_SAMPLE_COUNT - 1) % SAMPLES_PER_FRAME : 0;
+    wire exact_loop_end = frame_inc && frame_q == LOOP_LAST_FRAME && acc == LOOP_LAST_SAMPLE;
+    wire song_restart = I_loop_pulse | (LOOP_SAMPLE_COUNT > 0 ?
+        exact_loop_end : (frame_q > I_loop_frame));
     wire frame_clr    = song_restart;          // 归零 从头播字幕
 
     wire [23:0] frame_now  = frame_q;                            // 供 使用
@@ -129,7 +136,16 @@ module subtitle_engine #(
                 end
             end
 
-            case (st)
+            if (frame_clr) begin
+                O_cue_idx <= 10'd0;
+                st <= S_WAIT;
+                cur_frame <= 24'd0;
+                cur_coff <= 16'd0;
+                cur_len <= 16'd0;
+                nxt2_coff <= 16'd0;
+                nxt2_len <= 16'd0;
+                cue_valid <= 1'b0;
+            end else case (st)
 
                 S_IDLE: if (frame_tick | frame_clr) begin
 
@@ -297,6 +313,8 @@ module subtitle_engine #(
 
     assign O_char_addr = row_coff + {4'b0000, col0};
 
+    reg [3:0]  gy_d2;
+
     assign O_font_code = I_char_code;   // 码值（S2 有效） 字库地址高位
     assign O_font_row  = gy_d2;         // 行号（S2） 字库地址低位
 
@@ -304,7 +322,6 @@ module subtitle_engine #(
     reg [23:0] rgb_d2;
     reg        intxt_d2, l1_d2, en_d2, ok_d2;
     reg [3:0]  gx_d2;
-    reg [3:0]  gy_d2;
 
     always @(posedge I_clk or posedge I_rst) begin
         if (I_rst) begin

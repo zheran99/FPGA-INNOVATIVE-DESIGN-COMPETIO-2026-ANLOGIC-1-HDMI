@@ -30,6 +30,8 @@ module uart_cmd #(
     input  wire        I_auto_on,       // 轮播开关（已同步到 clk 域）
     input  wire [1:0]  I_sub_mode,      // 字幕模式 0..3（0=关）
     input  wire [1:0]  I_sd_state,      // 0=OK 1=SCAN 2=NOIMG 3=NOSD
+    input  wire [1:0]  I_ad_language,
+    input  wire        I_ad_layout,
 
     output reg         O_wr,
     output reg  [3:0]  O_wr_sel,
@@ -40,7 +42,7 @@ module uart_cmd #(
     output reg  [2:0]  O_p5_sel,        // 0=SUB 1=SBG 2=MON 3=SIZE
     output reg  [1:0]  O_p5_val,
     output reg         O_p6_wr,
-    output reg  [1:0]  O_p6_sel,        // 0=LOGO
+    output reg  [2:0]  O_p6_sel,        // 0=LOGO 1=广告 2=背景 3=语言 4=布局
     output reg  [1:0]  O_p6_val,
     output reg         O_p7_wr,         // SPEn / SPSn（ p7_reg）
     output reg  [1:0]  O_p7_sel,        // 0=SPE(频谱开关) 1=SPS(方向)
@@ -70,7 +72,7 @@ module uart_cmd #(
 
     localparam [2:0] K_NONE = 3'd0, K_PONG = 3'd1, K_SET = 3'd2,
                      K_ACT  = 3'd3, K_VER  = 3'd4, K_ERR = 3'd5,
-                     K_STAT = 3'd6;
+                     K_STAT = 3'd6, K_ADST = 3'd7;
 
     localparam [2:0] E_NONE = 3'd0, E_CMD = 3'd1, E_FMT = 3'd2, E_LONG = 3'd3,
                      E_TIME = 3'd4, E_MODE = 3'd5, E_IMPL = 3'd6;
@@ -88,7 +90,10 @@ module uart_cmd #(
                       C_SSP  = 32'h53535000, C_SSZ  = 32'h53535A00,
                       C_SBG  = 32'h53424700, C_LOG  = 32'h4C4F4700,
                       C_SPE  = 32'h53504500, C_SPS  = 32'h53505300,
-                      C_MON  = 32'h4D4F4E00;
+                      C_MON  = 32'h4D4F4E00,
+                      C_ADL  = 32'h41444C00, C_ADP = 32'h41445000,
+                      C_ADE  = 32'h41444500, C_ADB = 32'h41444200,
+                      C_ADST = 32'h41445354;
 
     localparam [2:0] M_P8 = 3'd7;       // 串口调试（唯一允许串口命令的模式）
 
@@ -267,7 +272,8 @@ module uart_cmd #(
     reg        d_wr, d_rset, d_p5wr, d_p6wr, d_p7wr;
     reg        d_paus_set, d_paus_clr, d_next, d_prev, d_autoset, d_autoval;
     reg [2:0]  d_p5sel;
-    reg [1:0]  d_p5val, d_p6val, d_p6sel, d_p7sel, d_p7val;
+    reg [1:0]  d_p5val, d_p6val, d_p7sel, d_p7val;
+    reg [2:0]  d_p6sel;
 
     wire [7:0] c_sub  = clamp8(pval, 8'd0, 8'd3);
     wire [7:0] c_sbg  = clamp8(pval, 8'd0, 8'd2);
@@ -314,6 +320,15 @@ module uart_cmd #(
             case (cmd_vec)
             C_PING: d_kind = K_PONG;
             C_STAT: d_kind = K_STAT;
+            C_ADST: d_kind = K_ADST;
+            C_ADL: begin d_wsel=S_LOCAL;d_p6wr=1'b1;d_p6sel=3'd3;
+                         d_p6val=c_logo[1:0];d_lval={8'd0,c_logo};d_kind=K_SET;end
+            C_ADP: begin d_wsel=S_LOCAL;d_p6wr=1'b1;d_p6sel=3'd4;
+                         d_p6val=c_bin[1:0];d_lval={8'd0,c_bin};d_kind=K_SET;end
+            C_ADE: begin d_wsel=S_LOCAL;d_p6wr=1'b1;d_p6sel=3'd1;
+                         d_p6val=c_bin[1:0];d_lval={8'd0,c_bin};d_kind=K_SET;end
+            C_ADB: begin d_wsel=S_LOCAL;d_p6wr=1'b1;d_p6sel=3'd2;
+                         d_p6val=c_logo[1:0];d_lval={8'd0,c_logo};d_kind=K_SET;end
             C_VERS: d_kind = K_VER;
             C_RSET: begin d_rset = 1'b1; d_kind = K_ACT; end
             C_SYNC: begin d_err = E_IMPL; d_kind = K_ERR; end
@@ -498,6 +513,7 @@ module uart_cmd #(
                         (I_sd_state == 2'd2) ? 4'd5 : 4'd4;
 
     wire [6:0] d_len =
+        (d_kind == K_ADST) ? 7'd24 :
         (d_kind == K_PONG) ? 7'd6  :
         (d_kind == K_VER ) ? 7'd14 :
         (d_kind == K_SET ) ? (7'd9 + {4'd0, n_ltr}) :
@@ -670,6 +686,20 @@ module uart_cmd #(
                     if (i < (7'd3 + {4'd0, r_nltr})) begin
                         resp_token = r_cmd_char(i[1:0] - 2'd3);
                     end
+                end
+
+                K_ADST: begin
+                    case(i)
+                        0:resp_token="A";1:resp_token="D";2:resp_token=" ";
+                        3:resp_token="L";4:resp_token="A";5:resp_token="N";
+                        6:resp_token="G";7:resp_token="=";
+                        8,9,19,20:resp_token="0";
+                        10:resp_token=8'd48+{6'd0,I_ad_language};
+                        11:resp_token=" ";12:resp_token="L";13:resp_token="A";
+                        14:resp_token="Y";15:resp_token="O";16:resp_token="U";
+                        17:resp_token="T";18:resp_token="=";
+                        default:resp_token=8'd48+{7'd0,I_ad_layout};
+                    endcase
                 end
                 K_STAT: resp_token = (r_hash && (i == 7'd0)) ? "#"
                                      : stat_token(r_hash ? (i - 7'd1) : i);

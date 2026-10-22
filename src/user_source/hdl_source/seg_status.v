@@ -100,19 +100,16 @@ module seg_status #(
 
     reg [7:0] ch5, ch4, ch3, ch2, ch1, ch0;
 
-    function [7:0] hex_char;
-        input [3:0] d;
-        begin
-            hex_char = (d < 4'd10) ? num_char(d) : CH_hexA_to_F(d);
-        end
-    endfunction
-
     reg        sd_bad;
     reg [3:0]  sd_f_ten, sd_f_one;
 
     wire [3:0] item_disp = {1'b0, I_param_item} + 4'd1;
 
-    wire [7:0] val8      = I_param_val[7:0];
+    reg [7:0] val8;
+    always @(posedge I_clk or negedge I_rst_n) begin
+        if(!I_rst_n) val8<=0;
+        else val8<=I_param_val[7:0];
+    end
     wire       val_ge100 = (val8 >= 8'd100);
     wire [7:0] val_sub   = val_ge100 ? (val8 - 8'd100) : val8;
     wire [3:0] v_hund    = val_ge100 ? 4'd1 : 4'd0;
@@ -198,12 +195,12 @@ module seg_status #(
             ch1 = num_char(v_one);  ch0 = CH_BLANK;
         end
 
-        3'd7: begin                       // P8 串口调试
-
-            ch3 = hex_char(I_uart_rx_cnt[7:4]);
-            ch2 = hex_char(I_uart_rx_cnt[3:0]);
-            ch1 = hex_char(I_uart_tx_cnt[7:4]);
-            ch0 = hex_char(I_uart_tx_cnt[3:0]);
+        3'd7: begin                       // P8 release version: 8 r1.0
+            ch4 = CH_BLANK;
+            ch3 = CH_r;
+            ch2 = num_char(4'd1) & 8'h7F;
+            ch1 = num_char(4'd0);
+            ch0 = CH_BLANK;
         end
 
         default: begin
@@ -292,12 +289,13 @@ module seg_status #(
     };
 
     always @(*) begin
-        O_seg_5 = blank_mask[5] ? CH_BLANK : ch5;
-        O_seg_4 = blank_mask[4] ? CH_BLANK : ch4;
-        O_seg_3 = blank_mask[3] ? CH_BLANK : ch3;
-        O_seg_2 = blank_mask[2] ? CH_BLANK : ch2;
-        O_seg_1 = blank_mask[1] ? CH_BLANK : ch1;
-        O_seg_0 = blank_mask[0] ? CH_BLANK : ch0;
+
+        O_seg_5 = blank_mask[5] ? CH_BLANK : ch_last[5];
+        O_seg_4 = blank_mask[4] ? CH_BLANK : ch_last[4];
+        O_seg_3 = blank_mask[3] ? CH_BLANK : ch_last[3];
+        O_seg_2 = blank_mask[2] ? CH_BLANK : ch_last[2];
+        O_seg_1 = blank_mask[1] ? CH_BLANK : ch_last[1];
+        O_seg_0 = blank_mask[0] ? CH_BLANK : ch_last[0];
     end
 
 endmodule

@@ -162,40 +162,38 @@ module sync_monitor #(
         end
     end
 
-    function [7:0] dec; input [3:0] d;
-        begin dec = 8'h30 + {4'd0, d}; end
+    function [4:0] dec; input [3:0] d;
+        begin dec = d<4'd10 ? {1'b0,d}+5'd1 : 5'd0; end
     endfunction
 
-    function [7:0] hexd; input [3:0] d;
-        begin hexd = (d < 4'd10) ? (8'h30 + {4'd0, d})
-                                 : (8'h41 + {4'd0, d} - 8'd10);
-        end
+    function [4:0] hexd; input [3:0] d;
+        begin hexd = {1'b0,d}+5'd1; end
     endfunction
 
-    reg [7:0] ch_c;
+    reg [4:0] ch_c;
     always @(*) begin
-        ch_c = 8'h20;
+        ch_c = 5'd0;
         case (row)
         3'd0: begin
-            if      (col == 5'd0)  ch_c = "S";
-            else if (col == 5'd1)  ch_c = "Y";
-            else if (col == 5'd2)  ch_c = "N";
-            else if (col == 5'd3)  ch_c = "C";
-            else if (col == 5'd5)  ch_c = "M";
-            else if (col == 5'd6)  ch_c = "O";
-            else if (col == 5'd7)  ch_c = "N";
-            else if (col == 5'd8)  ch_c = "I";
-            else if (col == 5'd9)  ch_c = "T";
-            else if (col == 5'd10) ch_c = "O";
-            else if (col == 5'd11) ch_c = "R";
+            if      (col == 5'd0)  ch_c = compact_glyph("S");
+            else if (col == 5'd1)  ch_c = compact_glyph("Y");
+            else if (col == 5'd2)  ch_c = compact_glyph("N");
+            else if (col == 5'd3)  ch_c = compact_glyph("C");
+            else if (col == 5'd5)  ch_c = compact_glyph("M");
+            else if (col == 5'd6)  ch_c = compact_glyph("O");
+            else if (col == 5'd7)  ch_c = compact_glyph("N");
+            else if (col == 5'd8)  ch_c = compact_glyph("I");
+            else if (col == 5'd9)  ch_c = compact_glyph("T");
+            else if (col == 5'd10) ch_c = compact_glyph("O");
+            else if (col == 5'd11) ch_c = compact_glyph("R");
         end
 
         3'd1: begin
-            if      (col == 5'd0)  ch_c = "F";
-            else if (col == 5'd1)  ch_c = "R";
-            else if (col == 5'd2)  ch_c = "A";
-            else if (col == 5'd3)  ch_c = "M";
-            else if (col == 5'd4)  ch_c = "E";
+            if      (col == 5'd0)  ch_c = compact_glyph("F");
+            else if (col == 5'd1)  ch_c = compact_glyph("R");
+            else if (col == 5'd2)  ch_c = compact_glyph("A");
+            else if (col == 5'd3)  ch_c = compact_glyph("M");
+            else if (col == 5'd4)  ch_c = compact_glyph("E");
             else if (col == 5'd6)  ch_c = dec(f6);
             else if (col == 5'd7)  ch_c = dec(f5);
             else if (col == 5'd8)  ch_c = dec(f4);
@@ -206,11 +204,11 @@ module sync_monitor #(
         end
 
         3'd2: begin
-            if      (col == 5'd0)  ch_c = "S";
-            else if (col == 5'd1)  ch_c = "A";
-            else if (col == 5'd2)  ch_c = "M";
-            else if (col == 5'd3)  ch_c = "P";
-            else if (col == 5'd5)  ch_c = "h";
+            if      (col == 5'd0)  ch_c = compact_glyph("S");
+            else if (col == 5'd1)  ch_c = compact_glyph("A");
+            else if (col == 5'd2)  ch_c = compact_glyph("M");
+            else if (col == 5'd3)  ch_c = compact_glyph("P");
+            else if (col == 5'd5)  ch_c = compact_glyph("h");
             else if (col == 5'd7)  ch_c = hexd(I_sample_cnt[23:20]);
             else if (col == 5'd8)  ch_c = hexd(I_sample_cnt[19:16]);
             else if (col == 5'd9)  ch_c = hexd(I_sample_cnt[15:12]);
@@ -223,47 +221,47 @@ module sync_monitor #(
             else if (col == 5'd1) ch_c = dec(s2);
             else if (col == 5'd2) ch_c = dec(s1);
             else if (col == 5'd3) ch_c = dec(s0);
-            else if (col == 5'd5) ch_c = "S";
-            else if (col == 5'd6) ch_c = "E";
-            else if (col == 5'd7) ch_c = "C";
+            else if (col == 5'd5) ch_c = compact_glyph("S");
+            else if (col == 5'd6) ch_c = compact_glyph("E");
+            else if (col == 5'd7) ch_c = compact_glyph("C");
         end
         3'd4: begin
-            if      (col == 5'd0)  ch_c = "A";
-            else if (col == 5'd1)  ch_c = "U";
-            else if (col == 5'd2)  ch_c = "D";
-            else if (col == 5'd4)  ch_c = "F";
-            else if (col == 5'd5)  ch_c = "S";
-            else if (col == 5'd6)  ch_c = "M";
+            if      (col == 5'd0)  ch_c = compact_glyph("A");
+            else if (col == 5'd1)  ch_c = compact_glyph("U");
+            else if (col == 5'd2)  ch_c = compact_glyph("D");
+            else if (col == 5'd4)  ch_c = compact_glyph("F");
+            else if (col == 5'd5)  ch_c = compact_glyph("S");
+            else if (col == 5'd6)  ch_c = compact_glyph("M");
             else if (col == 5'd8)  ch_c = hexd(I_aud_fsm[7:4]);
             else if (col == 5'd9)  ch_c = hexd(I_aud_fsm[3:0]);
-            else if (col == 5'd11) ch_c = "U";
-            else if (col == 5'd13) ch_c = I_aud_undr ? "1" : "0";
+            else if (col == 5'd11) ch_c = compact_glyph("U");
+            else if (col == 5'd13) ch_c = I_aud_undr ? compact_glyph("1") : compact_glyph("0");
         end
         3'd5: begin
-            if      (col == 5'd0) ch_c = "V";
-            else if (col == 5'd1) ch_c = "I";
-            else if (col == 5'd2) ch_c = "D";
-            else if (col == 5'd4) ch_c = "F";
-            else if (col == 5'd5) ch_c = "S";
-            else if (col == 5'd6) ch_c = "M";
+            if      (col == 5'd0) ch_c = compact_glyph("V");
+            else if (col == 5'd1) ch_c = compact_glyph("I");
+            else if (col == 5'd2) ch_c = compact_glyph("D");
+            else if (col == 5'd4) ch_c = compact_glyph("F");
+            else if (col == 5'd5) ch_c = compact_glyph("S");
+            else if (col == 5'd6) ch_c = compact_glyph("M");
             else if (col == 5'd8) ch_c = hexd(I_vid_fsm[7:4]);
             else if (col == 5'd9) ch_c = hexd(I_vid_fsm[3:0]);
         end
         3'd6: begin
-            if      (col == 5'd0)  ch_c = "I";
-            else if (col == 5'd1)  ch_c = "M";
-            else if (col == 5'd2)  ch_c = "G";
+            if      (col == 5'd0)  ch_c = compact_glyph("I");
+            else if (col == 5'd1)  ch_c = compact_glyph("M");
+            else if (col == 5'd2)  ch_c = compact_glyph("G");
             else if (col == 5'd4)  ch_c = hexd(I_img_idx);
-            else if (col == 5'd6)  ch_c = "M";
-            else if (col == 5'd7)  ch_c = "O";
-            else if (col == 5'd8)  ch_c = "D";
-            else if (col == 5'd9)  ch_c = "E";
+            else if (col == 5'd6)  ch_c = compact_glyph("M");
+            else if (col == 5'd7)  ch_c = compact_glyph("O");
+            else if (col == 5'd8)  ch_c = compact_glyph("D");
+            else if (col == 5'd9)  ch_c = compact_glyph("E");
             else if (col == 5'd11) ch_c = hexd(I_mode_num[3:0]);
-            else if (col == 5'd13) ch_c = "I";
-            else if (col == 5'd14) ch_c = "T";
+            else if (col == 5'd13) ch_c = compact_glyph("I");
+            else if (col == 5'd14) ch_c = compact_glyph("T");
             else if (col == 5'd16) ch_c = dec({1'b0, I_item});
         end
-        default: ch_c = 8'h20;
+        default: ch_c = 5'd0;
         endcase
     end
 
@@ -319,7 +317,7 @@ reg [4:0] ch_d2;
             inpanel_d2 <= inpanel_d1 & I_en;
             bord_d2    <= bord;
             gx_d2      <= gx;
-            ch_d2 <= compact_glyph(ch_c);              // D2 给字库地址
+            ch_d2 <= ch_c;              // D2 给字库地址
         end
     end
 

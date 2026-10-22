@@ -87,111 +87,81 @@ module ad_font_rom (
 endmodule
 
 module ad_line_ram (
-    input  wire        clk,          // video_clk（读）
-    input  wire [5:0]  addr,         // {img[3:0], line[1:0]}
-    output reg  [15:0] q,            // {len[5:0], offset[9:0]}
-
-    input  wire        I_wr_clk,     // sd_card_clk（写）
-    input  wire        I_wr_en,
-    input  wire [5:0]  I_wr_addr,
-    input  wire [15:0] I_wr_data
+    input wire clk, input wire [6:0] addr, output reg [16:0] q,
+    input wire I_wr_clk, input wire I_wr_en,
+    input wire [6:0] I_wr_addr, input wire [16:0] I_wr_data
 );
-
-    (* ram_style = "dram" *) reg [15:0] m_ln [0:63];
-    always @(posedge clk)
-        q <= m_ln[addr];
-    always @(posedge I_wr_clk)
-        if (I_wr_en) m_ln[I_wr_addr] <= I_wr_data;
-
+    (* ram_style = "bram" *) reg [16:0] m_ln [0:127];
+    always @(posedge clk) q <= m_ln[addr];
+    always @(posedge I_wr_clk) if(I_wr_en) m_ln[I_wr_addr] <= I_wr_data;
     integer i;
-    initial begin
-        for (i = 0; i < 64; i = i + 1) m_ln[i] = 16'd0;
-    end
+    initial for(i=0;i<128;i=i+1) m_ln[i]=0;
 endmodule
 
-module ad_str_tbl(
-    input  wire        clk,
-    input  wire [3:0]  img,
-    input  wire [1:0]  line,
-    input  wire [5:0]  col,
-    output wire [7:0]  code,
-    output reg  [5:0]  len,
-
-    input  wire        I_wr_clk,
-    input  wire        I_wr_en,
-    input  wire [5:0]  I_wr_addr,
-    input  wire [15:0] I_wr_data,
-
-    input  wire        I_ch_wr_en,
-    input  wire [9:0]  I_ch_wr_addr,
-    input  wire [7:0]  I_ch_wr_data
+module ad_str_tbl (
+    input wire clk, input wire rst, input wire blank,
+    input wire [3:0] img, input wire [2:0] line, input wire [5:0] col,
+    output wire [7:0] code, output wire [5:0] len, output wire ready,
+    input wire I_wr_clk, input wire I_wr_en,
+    input wire [6:0] I_wr_addr, input wire [16:0] I_wr_data,
+    input wire I_ch_wr_en, input wire [10:0] I_ch_wr_addr,
+    input wire [7:0] I_ch_wr_data
 );
+    reg [3:0] fetch_img, cached_img;
+    reg [3:0] count;
+    reg busy, valid_cache, active_bank, fetch_nonempty;
 
-    reg [1:0] ridx, ridx_d;
-    reg [15:0] ln0, ln1, ln2, ln3;
-    wire [15:0] ram_q;
+    (* ram_style = "dram" *) reg [16:0] cache [0:15];
+    wire [16:0] ram_q;
+    wire [2:0] read_slot=count[2:0];
+    ad_line_ram u_ln(.clk(clk),.addr({fetch_img,read_slot}),.q(ram_q),
+        .I_wr_clk(I_wr_clk),.I_wr_en(I_wr_en),.I_wr_addr(I_wr_addr),.I_wr_data(I_wr_data));
+    wire [2:0] write_slot=count[2:0]-3'd1;
+    wire cache_we=!rst && blank && busy && count!=0 && count<9;
+    always @(posedge clk)
+        if(cache_we) cache[{~active_bank,write_slot}]<=ram_q;
+    integer k;
+    initial for(k=0;k<16;k=k+1) cache[k]=0;
+    always @(posedge clk or posedge rst) begin
+        if(rst) begin
+            fetch_img<=0;cached_img<=15;count<=0;busy<=0;valid_cache<=0;
+            active_bank<=0;fetch_nonempty<=0;
+        end else if(!blank) begin busy<=0;count<=0;end
+        else if(!busy) begin fetch_img<=img;count<=0;busy<=1;fetch_nonempty<=0;end
+        else if(count<9) begin
 
-    ad_line_ram u_ln (
-        .clk        (clk),
-        .addr       ({img, ridx}),
-        .q          (ram_q),
-        .I_wr_clk   (I_wr_clk),
-        .I_wr_en    (I_wr_en),
-        .I_wr_addr  (I_wr_addr),
-        .I_wr_data  (I_wr_data)
-    );
-
-    always @(posedge clk) begin
-        ridx   <= ridx + 2'd1;
-        ridx_d <= ridx;
-        case (ridx_d)
-            2'd0: ln0 <= ram_q;
-            2'd1: ln1 <= ram_q;
-            2'd2: ln2 <= ram_q;
-            2'd3: ln3 <= ram_q;
-        endcase
+            if(count!=0 && write_slot!=3 && write_slot!=7)
+                fetch_nonempty<=fetch_nonempty || |ram_q[16:11];
+            count<=count+1'b1;
+        end else begin
+            if(img==fetch_img) begin
+                active_bank<=~active_bank;
+                cached_img<=fetch_img;
+                valid_cache<=fetch_nonempty;
+            end
+            busy<=0;count<=0;
+        end
     end
-
-    wire [15:0] cur = (line == 2'd0) ? ln0 :
-                      (line == 2'd1) ? ln1 :
-                      (line == 2'd2) ? ln2 : ln3;
-    wire [9:0] offset = cur[9:0];
-
-    always @(*) len = cur[15:10];
-
-    wire [9:0]  addr     = offset + {4'd0, col};
-    wire [7:0]  raw_code;
-    reg         valid;
-    always @(posedge clk) valid <= (img < 9) && (col < len);
-    ad_char_stream u_chars (
-        .clk       (clk),
-        .addr      (addr),
-        .code      (raw_code),
-        .I_wr_clk  (I_wr_clk),
-        .I_wr_en   (I_ch_wr_en),
-        .I_wr_addr (I_ch_wr_addr),
-        .I_wr_data (I_ch_wr_data)
-    );
-    assign code = valid ? raw_code : 8'd0;
+    assign ready=valid_cache && cached_img==img && img<9;
+    wire [16:0] cur=cache[{active_bank,line}];
+    assign len=ready ? cur[16:11] : 6'd0;
+    wire [10:0] addr=cur[10:0]+{5'd0,col};
+    wire [7:0] raw_code;
+    reg valid;
+    always @(posedge clk) valid<=ready && col<len;
+    ad_char_stream u_chars(.clk(clk),.addr(addr),.code(raw_code),
+        .I_wr_clk(I_wr_clk),.I_wr_en(I_ch_wr_en),.I_wr_addr(I_ch_wr_addr),.I_wr_data(I_ch_wr_data));
+    assign code=valid ? raw_code : 8'd0;
 endmodule
 
-module ad_char_stream(
-    input  wire        clk,
-    input  wire [9:0]  addr,
-    output reg  [7:0]  code,
-
-    input  wire        I_wr_clk,
-    input  wire        I_wr_en,
-    input  wire [9:0]  I_wr_addr,
-    input  wire [7:0]  I_wr_data
+module ad_char_stream (
+    input wire clk, input wire [10:0] addr, output reg [7:0] code,
+    input wire I_wr_clk, input wire I_wr_en,
+    input wire [10:0] I_wr_addr, input wire [7:0] I_wr_data
 );
-    reg [7:0] mem [0:1023];
-    always @(posedge clk)
-        code <= mem[addr];
-    always @(posedge I_wr_clk)
-        if (I_wr_en) mem[I_wr_addr] <= I_wr_data;
+    reg [7:0] mem [0:2047];
+    always @(posedge clk) code<=mem[addr];
+    always @(posedge I_wr_clk) if(I_wr_en) mem[I_wr_addr]<=I_wr_data;
     integer i;
-    initial begin
-        for (i = 0; i < 1024; i = i + 1) mem[i] = 8'd0;
-    end
+    initial for(i=0;i<2048;i=i+1) mem[i]=0;
 endmodule

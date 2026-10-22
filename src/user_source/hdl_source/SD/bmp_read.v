@@ -1,4 +1,5 @@
 module bmp_read(
+    input abort_load,
     input                       clk,
     input                       rst,
     output                      ready,
@@ -69,8 +70,10 @@ reg header_match;
 wire header_match_d;
 reg hdr_byte_valid;
 reg [7:0] hdr_byte;
-reg [9:0] hdr_byte_index;
-wire bmp_data_valid;
+
+reg [5:0] hdr_byte_index;
+reg bmp_data_valid;
+reg [7:0] pixel_byte_q;
 wire [31:0] file_sector_count;
 wire [31:0] next_scan_sector_if_match;
 wire [31:0] next_scan_sector_if_miss;
@@ -100,18 +103,25 @@ always @(posedge clk or posedge rst) begin
     if (rst) begin
         hdr_byte_valid <= 1'b0;
         hdr_byte <= 8'd0;
-        hdr_byte_index <= 10'd0;
+        hdr_byte_index <= 6'd0;
         header_match <= 1'b0;
     end else begin
-        hdr_byte_valid <= ((state == ST_SCAN) || (state == ST_LOAD_HDR)) && sd_sec_read_data_valid;
+        hdr_byte_valid <= ((state == ST_SCAN) || (state == ST_LOAD_HDR)) &&
+                          sd_sec_read_data_valid && (rd_cnt[9:6] == 4'd0);
         hdr_byte <= sd_sec_read_data;
-        hdr_byte_index <= rd_cnt;
+        hdr_byte_index <= rd_cnt[5:0];
         header_match <= header_match_d;
     end
 end
-assign bmp_data_valid = (sd_sec_read_data_valid == 1'b1) &&
-                        (bmp_len_cnt >= pixel_offset) &&
-                        (bmp_len_cnt <  file_len);
+
+always @(posedge clk or posedge rst) begin
+    if(rst) begin bmp_data_valid<=0;pixel_byte_q<=0;end
+    else begin
+        bmp_data_valid <= state==ST_LOAD_DATA && sd_sec_read_data_valid &&
+                          bmp_len_cnt>=pixel_offset && bmp_len_cnt<file_len;
+        pixel_byte_q <= sd_sec_read_data;
+    end
+end
 assign file_sector_count = file_sector_count_r;
 assign next_scan_sector_if_match = scan_sector + file_sector_count_r;
 assign next_scan_sector_if_miss  = scan_sector + 32'd1;
@@ -127,6 +137,7 @@ reg [12:0] step_work;
 reg [3:0] step_q, base_q;
 reg [10:0] base_rem;
 reg [23:0] fit_rem;
+reg [24:0] fit_trial;
 reg [10:0] fit_q, fit_r;
 reg [10:0] ow, oh, x0, x_end;
 reg [9:0] y0, y_end;
@@ -135,7 +146,7 @@ localparam GEO_CAPTURE = 4'd0, GEO_CONST_A = 4'd1,
            GEO_CONST_B = 4'd2, GEO_DIV_INIT = 4'd3,
            GEO_DIV = 4'd4, GEO_SIZE = 4'd5,
            GEO_BEGIN = 4'd6, GEO_END = 4'd7, GEO_DONE = 4'd8,
-           GEO_DDA_DIV = 4'd9;
+           GEO_DDA_DIV = 4'd9, GEO_DIV_COMMIT = 4'd10;
 reg [3:0] geo_phase;
 wire load_launch = (state == ST_LOAD_WAIT) && geo_ready && write_req_ack;
 
@@ -147,7 +158,7 @@ always @(posedge clk or posedge rst) begin
         sw3 <= 0; row_size <= 0;
         bind_x <= 0; upscale <= 0; num <= 0; den <= 0;
         step_work <= 0; step_q <= 0; base_q <= 0; base_rem <= 0;
-        fit_den <= 0; fit_rem <= 0; fit_q <= 0; fit_r <= 0;
+        fit_den <= 0; fit_rem <= 0; fit_trial <= 0; fit_q <= 0; fit_r <= 0;
         ow <= 0; oh <= 0; x0 <= 0; y0 <= 0; x_end <= 0; y_end <= 0;
         geo_phase <= GEO_CAPTURE;
         geo_ready <= 1'b0;
@@ -205,9 +216,15 @@ always @(posedge clk or posedge rst) begin
                 end
             end
             GEO_DIV: begin
-                if (fit_rem >= {11'd0, fit_den}) begin
-                    fit_rem <= fit_rem - {11'd0, fit_den};
+
+                fit_trial <= {1'b0, fit_rem} - {12'd0, fit_den};
+                geo_phase <= GEO_DIV_COMMIT;
+            end
+            GEO_DIV_COMMIT: begin
+                if (!fit_trial[24]) begin
+                    fit_rem <= fit_trial[23:0];
                     fit_q <= fit_q + 11'd1;
+                    geo_phase <= GEO_DIV;
                 end else begin
                     fit_r <= fit_q;
                     geo_phase <= GEO_SIZE;
@@ -318,9 +335,9 @@ always @(posedge clk or posedge rst) begin
         px_rgb <= 24'd0;
     else if (px_byte) begin
         case (bmp_byte_idx)
-            2'd0: px_rgb[7:0]   <= sd_sec_read_data;
-            2'd1: px_rgb[15:8]  <= sd_sec_read_data;
-            2'd2: px_rgb[23:16] <= sd_sec_read_data;
+            2'd0: px_rgb[7:0]   <= pixel_byte_q;
+            2'd1: px_rgb[15:8]  <= pixel_byte_q;
+            2'd2: px_rgb[23:16] <= pixel_byte_q;
             default: ;
         endcase
     end
@@ -408,26 +425,46 @@ always @(posedge clk or posedge rst) begin
     end
 end
 
-wire [11:0] outx_p1 = {1'b0, outx} + 12'd1;
-wire [11:0] outy_p1 = {1'b0, outy} + 12'd1;
+reg [11:0] outx_p1, outy_p1;
+always @(posedge clk or posedge rst) begin
+    if(rst) begin outx_p1<=0;outy_p1<=0;end
+    else begin
+        outx_p1<={1'b0,outx}+12'd1;
+        outy_p1<={1'b0,outy}+12'd1;
+    end
+end
 wire [11:0] x0w     = {1'b0, x0};
 wire [11:0] y0w     = {2'b0, y0};
-wire in_x      = ({1'b0, outx} >= x0w) && ({1'b0, outx} < {1'b0, x_end});
-wire in_y      = ({1'b0, outy} >= y0w) && ({1'b0, outy} < {2'b0, y_end});
-wire in_img    = in_x && in_y;
-wire in_x_next = (outx_p1 >= x0w) && (outx_p1 < {1'b0, x_end});
-wire in_y_next = (outy_p1 >= y0w) && (outy_p1 < {2'b0, y_end});
+reg in_x,in_y,in_img,in_x_next,in_y_next;
+
+always @(posedge clk or posedge rst) begin
+    if(rst) begin in_x<=0;in_y<=0;in_img<=0;in_x_next<=0;in_y_next<=0;end
+    else begin
+        in_x<=({1'b0,outx}>=x0w) && ({1'b0,outx}<{1'b0,x_end});
+        in_y<=({1'b0,outy}>=y0w) && ({1'b0,outy}<{2'b0,y_end});
+        in_img<=in_x && in_y;
+        in_x_next<=(outx_p1>=x0w) && (outx_p1<{1'b0,x_end});
+        in_y_next<=(outy_p1>=y0w) && (outy_p1<{2'b0,y_end});
+    end
+end
 
 // 源光标是否已到达所需位置
 
 reg at_need;
+reg source_row_last;
 always @(posedge clk or posedge rst) begin
     if (rst)
         at_need <= 1'b0;
     else
         at_need <= (cons_sy == need_sy) && (cons_sx == need_sx);
 end
+always @(posedge clk or posedge rst) begin
+    if(rst) source_row_last<=1'b0;
+    else source_row_last<=(cons_sx==sw_last);
+end
 
+reg up_filling;
+wire up_fill_consume;
 assign do_action = (state == ST_LOAD_DATA) && !out_done && !up_filling && dda_valid[3] && (out_tick == 5'd0);
 wire act_skip_dn = !upscale && do_action && in_img && !sf_empty && sf_data_valid && !at_need;
 
@@ -449,10 +486,11 @@ end
 wire src_want = !out_done && !src_done_r && !src_fifo_full_r;
 
 reg [23:0] lbuf [0:2047]; /* fehdl force_ram=1, ram_style="bram" */
-reg        up_filling;                          // 1 = 正在填充行缓冲
+
 reg        up_preload;                          // 1 = 填充预载拍（读第一个源像素）
 reg [10:0] up_wp;                               // 填充写指针 0..ow-1
-reg [11:0] up_xacc;                             // 填充横向 DDA 累加器（<2*den）
+
+reg [11:0] up_xacc;
 reg [23:0] up_pix;                              // 填充当前源像素（888）
 reg [23:0] lbuf_dout;                           // lbuf 读预取
 
@@ -478,12 +516,21 @@ function [7:0] ds_avg;
     end
 endfunction
 
-wire [10:0] lbuf_addr = ({1'b0, outx} >= x0w) ? ({1'b0, outx} - x0w) : 11'd0;
+reg [10:0] lbuf_addr;
+always @(posedge clk or posedge rst) begin
+    if (rst) lbuf_addr <= 11'd0;
+    else lbuf_addr <= outx[10:0] - x0;
+end
 
-wire        up_need_new = (up_xacc + {1'b0, num[10:0]} >= {1'b0, den}) && (up_wp != ow - 11'd1);
+reg [10:0] ow_last;
+always @(posedge clk or posedge rst) begin
+    if(rst) ow_last<=0;
+    else ow_last<=ow-11'd1;
+end
+wire        up_need_new = (up_xacc >= {1'b0, den}) && (up_wp != ow_last);
 wire        up_write_ok = !up_preload && !(up_need_new && (sf_empty || !sf_data_valid));
 
-wire        up_fill_consume = up_filling && (
+assign      up_fill_consume = up_filling && (
                   (up_preload && !sf_empty && sf_data_valid) ||
                   (up_write_ok && up_need_new));
 
@@ -531,7 +578,7 @@ always @(posedge clk or posedge rst) begin
         up_filling    <= upscale && (ow != 11'd0);
         up_preload    <= upscale && (ow != 11'd0);
         up_wp         <= 11'd0;
-        up_xacc       <= 12'd0;
+        up_xacc       <= {1'b0, num[10:0]};
         up_pix        <= 24'd0;
         ds_sum_r      <= 10'd0;
         ds_sum_g      <= 10'd0;
@@ -546,7 +593,7 @@ always @(posedge clk or posedge rst) begin
                     up_pix      <= sf_dout;
                     up_preload  <= 1'b0;
                     up_wp       <= 11'd0;
-                    up_xacc     <= 12'd0;
+                    up_xacc     <= {1'b0, num[10:0]};
                 end
             end else if (up_write_ok) begin
 
@@ -557,7 +604,7 @@ always @(posedge clk or posedge rst) begin
                 end else begin
                     up_xacc <= up_xacc + {1'b0, num[10:0]};
                 end
-                if (up_wp == ow - 11'd1)
+                if (up_wp == ow_last)
                     up_filling <= 1'b0;                 // 填满 ow 个条目
                 else
                     up_wp <= up_wp + 11'd1;
@@ -658,7 +705,7 @@ always @(posedge clk or posedge rst) begin
                         ds_sum_g <= ds_sum_g + {2'b00, sf_dout[15:8]};
                         ds_sum_b <= ds_sum_b + {2'b00, sf_dout[7:0]};
                         ds_cnt   <= ds_cnt + 2'd1;
-                        if (cons_sx == sw_last) begin
+                        if (source_row_last) begin
                             cons_sx <= 13'd0;
                             cons_sy <= cons_sy + 13'd1;
 
@@ -701,36 +748,36 @@ always @(posedge clk or posedge rst) begin
         compression  <= 32'd0;
     end else if (hdr_byte_valid) begin
         case (hdr_byte_index)
-            10'd0 : header_0 <= hdr_byte;
-            10'd1 : header_1 <= hdr_byte;
+            6'd0 : header_0 <= hdr_byte;
+            6'd1 : header_1 <= hdr_byte;
 
-            10'd2 : file_len[7:0] <= hdr_byte;
-            10'd3 : file_len[15:8] <= hdr_byte;
-            10'd4 : file_len[23:16] <= hdr_byte;
-            10'd5 : file_len[31:24] <= hdr_byte;
+            6'd2 : file_len[7:0] <= hdr_byte;
+            6'd3 : file_len[15:8] <= hdr_byte;
+            6'd4 : file_len[23:16] <= hdr_byte;
+            6'd5 : file_len[31:24] <= hdr_byte;
 
-            10'd10: pixel_offset[7:0] <= hdr_byte;
-            10'd11: pixel_offset[15:8] <= hdr_byte;
-            10'd12: pixel_offset[23:16] <= hdr_byte;
-            10'd13: pixel_offset[31:24] <= hdr_byte;
+            6'd10: pixel_offset[7:0] <= hdr_byte;
+            6'd11: pixel_offset[15:8] <= hdr_byte;
+            6'd12: pixel_offset[23:16] <= hdr_byte;
+            6'd13: pixel_offset[31:24] <= hdr_byte;
 
-            10'd18: width[7:0] <= hdr_byte;
-            10'd19: width[15:8] <= hdr_byte;
-            10'd20: width[23:16] <= hdr_byte;
-            10'd21: width[31:24] <= hdr_byte;
+            6'd18: width[7:0] <= hdr_byte;
+            6'd19: width[15:8] <= hdr_byte;
+            6'd20: width[23:16] <= hdr_byte;
+            6'd21: width[31:24] <= hdr_byte;
 
-            10'd22: height[7:0] <= hdr_byte;
-            10'd23: height[15:8] <= hdr_byte;
-            10'd24: height[23:16] <= hdr_byte;
-            10'd25: height[31:24] <= hdr_byte;
+            6'd22: height[7:0] <= hdr_byte;
+            6'd23: height[15:8] <= hdr_byte;
+            6'd24: height[23:16] <= hdr_byte;
+            6'd25: height[31:24] <= hdr_byte;
 
-            10'd28: bit_count[7:0] <= hdr_byte;
-            10'd29: bit_count[15:8] <= hdr_byte;
+            6'd28: bit_count[7:0] <= hdr_byte;
+            6'd29: bit_count[15:8] <= hdr_byte;
 
-            10'd30: compression[7:0] <= hdr_byte;
-            10'd31: compression[15:8] <= hdr_byte;
-            10'd32: compression[23:16] <= hdr_byte;
-            10'd33: compression[31:24] <= hdr_byte;
+            6'd30: compression[7:0] <= hdr_byte;
+            6'd31: compression[15:8] <= hdr_byte;
+            6'd32: compression[23:16] <= hdr_byte;
+            6'd33: compression[31:24] <= hdr_byte;
             default: ;
         endcase
     end
@@ -777,6 +824,10 @@ always @(posedge clk or posedge rst) begin
         scan_found_total  <= 5'd0;
         scan_sector       <= 32'd0;
         load_sector_latched <= 32'd0;
+    end else if (abort_load) begin
+        state <= ST_IDLE; state_code <= 4'd9;
+        sd_sec_read <= 0; write_req <= 0; scan_found_valid <= 0;
+        scan_done <= 1; scan_warn <= 1;
     end else begin
         scan_found_valid <= 1'b0;
 

@@ -5,10 +5,11 @@ module p6_panel #(
     parameter V_ACTIVE = 720,
 
     parameter X0    = 182,      // 第 1 列起点（与 p5_panel 对齐）
-    parameter Y0    = 614,      // 单行起点（585..675 带内垂直居中）
+    parameter Y0    = 594,      // 单行起点（585..675 带内垂直居中）
     parameter CW    = 300,      // 格宽（沿用 p5_panel）
     parameter CH    = 32,       // 格高（= 文字高，恰好容纳）
-    parameter DX    = 308,      // 列间距（= CW + 8）
+    parameter DX    = 308,
+    parameter DY    = 40,      // 列间距（= CW + 8）
     parameter TB    = 2,        // 边框厚度
 
     parameter GLYPH_W  = 32,    // 字库字形宽（位）
@@ -38,13 +39,14 @@ module p6_panel #(
     input  wire [23:0] I_rgb,
 
     input  wire        I_panel_en,     // 1 = 显示面板（仅 P6）
-    input  wire [1:0]  I_item,         // 当前选中项 0..2
+    input  wire [2:0]  I_item,         // 当前选中项 0..2
 
     input  wire [1:0]  I_logo_sel,     // #0 标志：0=关 1=开(静止) 2=动(弹移)
     input  wire        I_ad_on,        // #1 广告：0=关 1=开
+    input wire [1:0] I_language, input wire I_layout, input wire [1:0] I_logo_size,
     input  wire [1:0]  I_ad_bg,        // #2 背景：0=无 1=半透 2=实底
 
-    output wire [5:0]  O_font_idx,     // D2 地址（6 位汉字索引）
+    output wire [6:0]  O_font_idx,     // D2 地址（6 位汉字索引）
     output wire [4:0]  O_font_row,     // D2 地址（5 位行号）
     input  wire [31:0] I_font_word,    // D3 数据（32 位，与 gx_d2 同拍）
 
@@ -91,7 +93,7 @@ module p6_panel #(
     end
 
     localparam X_END = X0 + 2 * DX + CW;      // 182 + 616 + 300 = 1098
-    localparam Y_END = Y0 + CH;               // 614 + 32 = 646
+    localparam Y_END = Y0 + DY + CH;               // 614 + 32 = 646
     localparam DX2   = 2 * DX;                // 616
     localparam CW_M  = CW - TB;
     localparam CH_M  = CH - TB;
@@ -109,27 +111,45 @@ module p6_panel #(
     wire col2 = (px >= DX2) && (px < DX2 + CW);
 
     wire row0 = (py < CH);
+    wire row1 = (py >= DY) && (py < DY+CH);
 
     wire [IX_W-1:0] ix = col0 ? px : (col1 ? (px - DX) : (px - DX2));
-    wire [IY_W-1:0] iy = py;
+    wire [IY_W-1:0] iy = row1 ? py-DY : py;
 
-    wire in_cell = in_panel & (col0 | col1 | col2) & row0;
+    wire in_cell = in_panel & (((col0 | col1 | col2) & row0) | ((col0 | col1 | col2) & row1));
 
     // 格号 0..2
 
-    wire [1:0] cid = col0 ? 2'd0 : (col1 ? 2'd1 : 2'd2);
+    reg [2:0] text_cid_d1;
+    wire [2:0] cid=text_cid_d1;
 
     wire bord = (ix < TB) || (ix >= CW_M) || (iy < TB) || (iy >= CH_M);
 
     wire sel = (cid == I_item);
 
-    wire [PX_W-1:0] OFF_NAME = col0 ? NAME_X : (col1 ? (DX + NAME_X) : (DX2 + NAME_X));
-    wire [PX_W-1:0] OFF_VAL  = col0 ? VAL_X  : (col1 ? (DX + VAL_X)  : (DX2 + VAL_X));
-    wire [5:0] nx_off = px[5:0] - OFF_NAME[5:0];
-    wire [5:0] vx_off = px[5:0] - OFF_VAL[5:0];
-
-    wire in_name = (px >= OFF_NAME) && (px < OFF_NAME + X2P);
-    wire in_val  = (px >= OFF_VAL)  && (px < OFF_VAL + X2P);
+    wire [11:0] text_x_next=x_now-X0, text_y_next=y_now-Y0;
+    wire [PX_W-1:0] text_px_next=text_x_next[PX_W-1:0];
+    wire [PY_W-1:0] text_py_next=text_y_next[PY_W-1:0];
+    wire text_col0_next=text_px_next<CW;
+    wire text_col1_next=text_px_next>=DX && text_px_next<DX+CW;
+    wire text_row1_next=text_py_next>=DY && text_py_next<DY+CH;
+    wire [PX_W-1:0] OFF_NAME=text_col0_next ? NAME_X : (text_col1_next ? DX+NAME_X : DX2+NAME_X);
+    wire [PX_W-1:0] OFF_VAL=text_col0_next ? VAL_X : (text_col1_next ? DX+VAL_X : DX2+VAL_X);
+    reg [5:0] nx_off,vx_off;
+    reg in_name,in_val;
+    always @(posedge I_clk or posedge I_rst) begin
+        if(I_rst)begin
+            text_cid_d1<=0;nx_off<=-NAME_X;vx_off<=-VAL_X;
+            in_name<=0;in_val<=0;
+        end else begin
+            text_cid_d1<=(text_row1_next ? 3'd3 : 3'd0)+
+                (text_col0_next ? 3'd0 : (text_col1_next ? 3'd1 : 3'd2));
+            nx_off<=text_px_next[5:0]-OFF_NAME[5:0];
+            vx_off<=text_px_next[5:0]-OFF_VAL[5:0];
+            in_name<=text_px_next>=OFF_NAME && text_px_next<OFF_NAME+X2P;
+            in_val<=text_px_next>=OFF_VAL && text_px_next<OFF_VAL+X2P;
+        end
+    end
 
     wire [5:0] off_c = in_val ? vx_off : nx_off;
 
@@ -139,46 +159,61 @@ module p6_panel #(
     wire [4:0]  gx_c = off_c[4:0];
     wire [4:0]  gy_c = iy[4:0];        // 格高 32 = 2^5
 
-    localparam [5:0] CN_KAI  = 6'd0,    // 开
-                     CN_GUAN = 6'd1,    // 关
-                     CN_BEI  = 6'd6,    // 背 #2 名称「背景」（与 p5_panel 同一对字）
-                     CN_JING = 6'd7,    // 景
-                     CN_DONG = 6'd13,   // 动
-                     CN_DI   = 6'd19,   // 底
-                     CN_WU   = 6'd23,   // 无
-                     CN_BAN  = 6'd24,   // 半
-                     CN_TOU  = 6'd25,   // 透
-                     CN_SHIT = 6'd26,   // 实
-                     CN_BIAO = 6'd39,
-                     CN_ZHI  = 6'd40,
-                     CN_GUANG= 6'd41,
-                     CN_GAO  = 6'd42;
+    localparam [6:0] CN_KAI  = 7'd0,    // 开
+                     CN_GUAN = 7'd1,    // 关
+                     CN_BEI  = 7'd6,    // 背 #2 名称「背景」（与 p5_panel 同一对字）
+                     CN_JING = 7'd7,    // 景
+                     CN_DONG = 7'd13,   // 动
+                     CN_DI   = 7'd19,   // 底
+                     CN_WU   = 7'd23,   // 无
+                     CN_BAN  = 7'd24,   // 半
+                     CN_TOU  = 7'd25,   // 透
+                     CN_SHIT = 7'd26,   // 实
+                     CN_BIAO = 7'd39,
+                     CN_ZHI  = 7'd40,
+                     CN_GUANG= 7'd41,
+                     CN_GAO  = 7'd42;
 
-    localparam [5:0] CN_BLANK = 6'd38;
+    localparam [6:0] CN_BLANK = 7'd38;
 
-    reg [5:0] nm0_c, nm1_c;
+    localparam [6:0] CN_YU=7'd64, CN_YAN=7'd65, CN_WEN=7'd66, CN_YING=7'd67,
+        CN_SHUANG=7'd68, CN_BU=7'd69, CN_JU=7'd70, CN_ZUO=7'd71, CN_SHANG=7'd72, CN_JU_CTR=7'd73, CN_ZHONG=7'd28;
+
+    reg [6:0] nm0_c, nm1_c;
     always @(*) begin
         case (cid)
-            2'd0:    begin nm0_c = CN_BIAO;  nm1_c = CN_ZHI;  end  // 标志
-            2'd1:    begin nm0_c = CN_GUANG; nm1_c = CN_GAO;  end  // 广告
+            3'd0:    begin nm0_c = CN_BIAO;  nm1_c = CN_ZHI;  end  // 标志
+            3'd1:    begin nm0_c = CN_GUANG; nm1_c = CN_GAO;  end  // 广告
+            3'd3: begin nm0_c=CN_YU; nm1_c=CN_YAN; end
+            3'd4: begin nm0_c=CN_BU; nm1_c=CN_JU; end
+            3'd5: begin nm0_c=7'd74; nm1_c=7'd27; end
             default: begin nm0_c = CN_BEI;   nm1_c = CN_JING; end  // 背景
         endcase
     end
 
-    reg [5:0] v0_c, v1_c;
+    reg [6:0] v0_c, v1_c;
     always @(*) begin
         case (cid)
-            2'd0: begin
+            3'd0: begin
                 case (I_logo_sel)
                     2'd0:    begin v0_c = CN_GUAN; v1_c = CN_BLANK; end // 关
                     2'd1:    begin v0_c = CN_KAI;  v1_c = CN_BLANK; end // 开
                     default: begin v0_c = CN_DONG; v1_c = CN_BLANK; end // 动
                 endcase
             end
-            2'd1: begin
+            3'd1: begin
                 v0_c = I_ad_on ? CN_KAI : CN_GUAN;
                 v1_c = CN_BLANK;
             end
+            3'd3: begin
+                case(I_language)
+                    0: begin v0_c=CN_ZHONG; v1_c=CN_WEN; end
+                    1: begin v0_c=CN_YING; v1_c=CN_WEN; end
+                    default: begin v0_c=CN_SHUANG; v1_c=CN_YU; end
+                endcase
+            end
+            3'd5: begin v0_c=I_logo_size==0 ? 7'd27 : I_logo_size==2 ? 7'd74 : CN_ZHONG; v1_c=CN_BLANK; end
+            3'd4: begin v0_c=I_layout ? CN_JU_CTR : CN_ZUO; v1_c=I_layout ? CN_ZHONG : CN_SHANG; end
 
             default: begin
                 case (I_ad_bg)
@@ -190,10 +225,10 @@ module p6_panel #(
         endcase
     end
 
-    wire [5:0] name_idx_c = nm1 ? nm1_c : nm0_c;
-    wire [5:0] val_idx_c  = vl1 ? v1_c  : v0_c;
+    wire [6:0] name_idx_c = nm1 ? nm1_c : nm0_c;
+    wire [6:0] val_idx_c  = vl1 ? v1_c  : v0_c;
 
-    wire [5:0] char_idx_c = in_val ? val_idx_c
+    wire [6:0] char_idx_c = in_val ? val_idx_c
                           : (in_name ? name_idx_c : CN_BLANK);
 
     reg        de_d2, hs_d2, vs_d2;

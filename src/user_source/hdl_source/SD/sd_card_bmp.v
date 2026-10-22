@@ -13,6 +13,9 @@ module sd_card_bmp #(
 )(
     input                       clk,
     input                       rst,
+    input sd_sec_error, input writer_abort_ack, input sd_idle,
+    output reg abort_write,
+    output sd_cancel,
     input                       key_next,
     input                       key_prev,        // Step2：上一张（按下=0）
     input                       key_auto,
@@ -79,11 +82,14 @@ reg              next_req_pending;
 reg              prev_req_pending;
 reg              load_busy;
 
+reg              schedule_hold;
+
 reg              source_done_seen;
 reg              finish_seen;
 
 reg [28:0]       load_wdog;
 reg              load_timeout;
+reg              load_wdog_expired;
 wire             load_wdog_fire;
 
 reg [2:0]        wrfin_tgl_sync;
@@ -122,16 +128,17 @@ wire [3:0] prev_pic = prev_index_limited(img_idx, img_found_count);
 
 function [1:0] find_slot;
     input [4:0] pic5;
+    input [4:0] cached0, cached1, cached2;
     begin
-        if      (slot_pic0 == pic5) find_slot = 2'd0;
-        else if (slot_pic1 == pic5) find_slot = 2'd1;
-        else if (slot_pic2 == pic5) find_slot = 2'd2;
+        if      (cached0 == pic5) find_slot = 2'd0;
+        else if (cached1 == pic5) find_slot = 2'd1;
+        else if (cached2 == pic5) find_slot = 2'd2;
         else                        find_slot = 2'd3;
     end
 endfunction
 
-wire [1:0] next_found_c = find_slot({1'b0, next_pic});
-wire [1:0] prev_found_c = find_slot({1'b0, prev_pic});
+wire [1:0] next_found_c = find_slot({1'b0, next_pic}, slot_pic0, slot_pic1, slot_pic2);
+wire [1:0] prev_found_c = find_slot({1'b0, prev_pic}, slot_pic0, slot_pic1, slot_pic2);
 
 wire next_valid_c = (next_found_c != 2'd3) && (next_found_c != cur_slot);
 wire prev_valid_c = (prev_found_c != 2'd3) && (prev_found_c != cur_slot);
@@ -202,6 +209,18 @@ always @(posedge clk or posedge rst) begin
     end
 end
 
+reg [1:0] abort_ack_sync;
+always @(posedge clk or posedge rst) begin
+    if(rst) begin abort_ack_sync<=0; abort_write<=0; end
+    else begin
+        abort_ack_sync<={abort_ack_sync[0],writer_abort_ack};
+        if(sd_sec_error || load_wdog_fire) abort_write<=1;
+        else if(abort_ack_sync[1] && sd_idle) abort_write<=0;
+    end
+end
+wire recovering=abort_write || abort_ack_sync[1] || sd_sec_error || load_wdog_fire;
+assign sd_cancel=load_wdog_fire || abort_write;
+
 wire [31:0] load_sector = load_sector_q;
 
 function [15:0] to565;
@@ -225,10 +244,10 @@ always @(posedge clk or posedge rst) begin
     end else begin
         wdata565_en <= 1'b0;
 
-if (load_start_d)
+if (load_start_d || recovering)
             rgb565_phase <= 1'b0;
 
-        if (bmp_data_wr_en) begin
+        if (bmp_data_wr_en && !recovering) begin
             if (!rgb565_phase) begin
                 pix_even     <= to565(bmp_data);
                 rgb565_phase <= 1'b1;
@@ -241,7 +260,7 @@ if (load_start_d)
     end
 end
 
-assign write_en   = wdata565_en;
+assign write_en   = wdata565_en && !recovering;
 assign write_data = wdata565;
 
 localparam [31:0] AUTO_TICK_MAX = (CLK_FREQ_HZ / 1000) * AUTO_INTERVAL_MS - 1;
@@ -249,7 +268,7 @@ assign auto_tick  = (auto_cnt == AUTO_TICK_MAX);
 assign next_from_current = next_index_limited(img_idx, img_found_count);
 assign write_finish_pulse = wrfin_tgl_sync[2] ^ wrfin_tgl_sync[1];
 
-assign load_wdog_fire = load_busy && (load_wdog >= 29'd500000000);
+assign load_wdog_fire = load_busy && load_wdog_expired;
 
 key_press_debounce #(
     .CLK_FREQ_HZ (CLK_FREQ_HZ),
@@ -348,9 +367,11 @@ always @(posedge clk or posedge rst) begin
         next_req_pending      <= 1'b0;
         prev_req_pending      <= 1'b0;
         load_busy             <= 1'b0;
+        schedule_hold         <= 1'b0;
         source_done_seen      <= 1'b0;
         finish_seen           <= 1'b0;
         load_wdog             <= 29'd0;
+        load_wdog_expired     <= 1'b0;
         load_timeout          <= 1'b0;
         display_valid         <= 1'b0;
         auto_play_en_o        <= 1'b0;
@@ -364,6 +385,7 @@ always @(posedge clk or posedge rst) begin
         wrfin_tgl_sync   <= {wrfin_tgl_sync[1:0], write_finish_toggle};
         scan_start_pulse <= 1'b0;
         load_start_pulse <= 1'b0;
+        schedule_hold <= 1'b0;
 
         if (!sd_init_done) begin
             scan_kicked           <= 1'b0;
@@ -410,7 +432,8 @@ always @(posedge clk or posedge rst) begin
                 if (write_finish_pulse) finish_seen      <= 1'b1;
             end
 
-            if (load_busy && source_done_seen && finish_seen) begin
+            if (load_busy && source_done_seen && finish_seen && !recovering) begin
+                schedule_hold <= 1'b1;
                 load_busy             <= 1'b0;
                 source_done_seen      <= 1'b0;
                 finish_seen           <= 1'b0;
@@ -439,10 +462,13 @@ always @(posedge clk or posedge rst) begin
                 end
             end
 
-            if (!load_busy || bmp_data_wr_en)
+            if (!load_busy || bmp_data_wr_en) begin
                 load_wdog <= 29'd0;
-            else if (!load_wdog_fire)
+                load_wdog_expired <= 1'b0;
+            end else if (!load_wdog_fire) begin
                 load_wdog <= load_wdog + 29'd1;
+                load_wdog_expired <= (load_wdog >= 29'd499999999);
+            end
 
             if (load_wdog_fire) begin
                 load_busy        <= 1'b0;
@@ -495,7 +521,8 @@ always @(posedge clk or posedge rst) begin
                     auto_cnt <= 32'd0;
                 end
 
-                if (scan_done && !first_image_committed && bmp_ready && !load_busy
+                if (!schedule_hold) begin
+                if (scan_done && !first_image_committed && bmp_ready && !load_busy && !recovering && !recovering
                     && (img_found_count != 3'd0)) begin
                     load_idx          <= 4'd0;
 
@@ -510,7 +537,7 @@ always @(posedge clk or posedge rst) begin
                     auto_cnt          <= 32'd0;
                 end
 
-                else if (display_valid && !load_busy && prev_req_pending && prev_valid
+                else if (display_valid && !load_busy && !recovering && prev_req_pending && prev_valid
                          && (img_found_count > 3'd1)) begin
                     prev_req_pending <= 1'b0;
                     next_req_pending <= 1'b0;
@@ -520,9 +547,10 @@ always @(posedge clk or posedge rst) begin
                     auto_cnt         <= 32'd0;   // 手动操作 复位轮播计时
                     prev_disp_idx    <= disp_buf_idx;
                     transition_tgl   <= ~transition_tgl;
+                    schedule_hold <= 1'b1;
                 end
 
-                else if (display_valid && !load_busy && next_req_pending && next_valid
+                else if (display_valid && !load_busy && !recovering && next_req_pending && next_valid
                          && (img_found_count > 3'd0)) begin
                     next_req_pending <= 1'b0;
                     prev_req_pending <= 1'b0;
@@ -532,6 +560,7 @@ always @(posedge clk or posedge rst) begin
                     auto_cnt         <= 32'd0;
                     prev_disp_idx    <= disp_buf_idx;
                     transition_tgl   <= ~transition_tgl;
+                    schedule_hold <= 1'b1;
                 end
 
                 else if (scan_done && bmp_ready && display_valid && !load_busy
@@ -574,6 +603,7 @@ always @(posedge clk or posedge rst) begin
                         pending_is_switch<= 1'b0;    // 本拍没启动加载
                         prev_disp_idx    <= disp_buf_idx;
                         transition_tgl   <= ~transition_tgl;
+                    schedule_hold <= 1'b1;
                     end else begin
                         load_idx          <= next_pic_r;
 
@@ -600,12 +630,26 @@ always @(posedge clk or posedge rst) begin
                     source_done_seen  <= 1'b0;
                     pending_is_switch <= 1'b0;       // 预加载 不切显示
                 end
+                end // schedule_hold
+            end
+            if (load_start_d) begin
+                case (pending_buf_idx)
+                    0: slot_pic0<=5'h1f;
+                    1: slot_pic1<=5'h1f;
+                    2: slot_pic2<=5'h1f;
+                endcase
+                finish_seen<=0; source_done_seen<=0;
+            end
+            if (recovering) begin
+                load_busy<=0; finish_seen<=0; source_done_seen<=0;
+                load_start_pulse<=0; pending_is_switch<=0; load_timeout<=1;
             end
         end
     end
 end
 
 bmp_read bmp_read_m0(
+    .abort_load(recovering),
     .clk                    (clk),
     .rst                    (rst),
     .ready                  (bmp_ready),
