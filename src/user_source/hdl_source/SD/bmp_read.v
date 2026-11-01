@@ -45,6 +45,7 @@ localparam ST_SCAN      = 3'd1;
 localparam ST_LOAD_HDR  = 3'd2;
 localparam ST_LOAD_WAIT = 3'd3;
 localparam ST_LOAD_DATA = 3'd4;
+localparam ST_SCAN_CHECK = 3'd5;
 
 localparam SF_DEPTH = 256;    // Source FIFO depth (BRAM)
 localparam SF_PAUSE = 64;
@@ -127,9 +128,9 @@ assign next_scan_sector_if_match = scan_sector + file_sector_count_r;
 assign next_scan_sector_if_miss  = scan_sector + 32'd1;
 
 reg [12:0] sw, sh, sw_last;
-reg [16:0] sw9, sh16;
+reg [16:0] sw9;
 reg [23:0] sw720_a, sw720_b, swx720, shx1280;
-reg [14:0] sw3, row_size;
+reg [14:0] sw3, row_size, row_last, pixel_last;
 reg bind_x, upscale;
 reg [12:0] num, fit_den;
 reg [10:0] den;
@@ -153,9 +154,9 @@ wire load_launch = (state == ST_LOAD_WAIT) && geo_ready && write_req_ack;
 always @(posedge clk or posedge rst) begin
     if (rst) begin
         sw <= 0; sh <= 0; sw_last <= 0;
-        sw9 <= 0; sh16 <= 0;
+        sw9 <= 0;
         sw720_a <= 0; sw720_b <= 0; swx720 <= 0; shx1280 <= 0;
-        sw3 <= 0; row_size <= 0;
+        sw3 <= 0; row_size <= 0; row_last <= 0; pixel_last <= 0;
         bind_x <= 0; upscale <= 0; num <= 0; den <= 0;
         step_work <= 0; step_q <= 0; base_q <= 0; base_rem <= 0;
         fit_den <= 0; fit_rem <= 0; fit_trial <= 0; fit_q <= 0; fit_r <= 0;
@@ -176,7 +177,6 @@ always @(posedge clk or posedge rst) begin
             GEO_CONST_A: begin
 
                 sw9 <= {1'b0, sw, 3'b0} + {4'b0, sw};
-                sh16 <= {sh, 4'b0};
                 sw720_a <= {2'b0, sw, 9'b0} + {4'b0, sw, 7'b0};
                 sw720_b <= {5'b0, sw, 6'b0} + {7'b0, sw, 4'b0};
                 shx1280 <= {1'b0, sh, 10'b0} + {3'b0, sh, 8'b0};
@@ -185,13 +185,17 @@ always @(posedge clk or posedge rst) begin
                 geo_phase <= GEO_CONST_B;
             end
             GEO_CONST_B: begin
-                bind_x <= (sw9 >= sh16);
+
+                bind_x <= (sw9[16:4] >= sh);
                 swx720 <= sw720_a + sw720_b;
                 upscale <= (sw < 13'd1280) && (sh < 13'd720);
                 row_size <= (sw3 + 15'd3) & 15'h7ffc;
+                pixel_last <= sw3 - 15'd1;
                 geo_phase <= GEO_DIV_INIT;
             end
             GEO_DIV_INIT: begin
+
+                row_last <= row_size == 0 ? 15'd0 : row_size - 15'd1;
                 num <= bind_x ? sw : sh;
                 den <= bind_x ? 11'd1280 : 11'd720;
                 step_work <= bind_x ? sw : sh;
@@ -303,7 +307,16 @@ end
 
 reg  [14:0] row_byte;                         // 当前源行内的字节位置 0..row_size-1
 
-wire px_byte = bmp_data_valid && (row_byte < sw3);        // 该字节是像素字节
+reg pixel_region;
+always @(posedge clk or posedge rst) begin
+    if (rst) pixel_region <= 1'b0;
+    else if (state != ST_LOAD_DATA) pixel_region <= (sw3 != 0);
+    else if (bmp_data_valid) begin
+        if (row_byte >= row_last) pixel_region <= (sw3 != 0);
+        else if (row_byte == pixel_last) pixel_region <= 1'b0;
+    end
+end
+wire px_byte = bmp_data_valid && pixel_region;        // 该字节是像素字节
 wire px_done = px_byte && (bmp_byte_idx == 2'd2);         // 第 3 字节 像素齐
 
 always @(posedge clk or posedge rst) begin
@@ -311,7 +324,7 @@ always @(posedge clk or posedge rst) begin
         row_byte <= 15'd0;
     else if (state == ST_LOAD_DATA) begin
         if (bmp_data_valid) begin
-            if (row_byte + 15'd1 >= row_size)
+            if (row_byte >= row_last)
                 row_byte <= 15'd0;
             else
                 row_byte <= row_byte + 15'd1;
@@ -527,7 +540,9 @@ always @(posedge clk or posedge rst) begin
     if(rst) ow_last<=0;
     else ow_last<=ow-11'd1;
 end
-wire        up_need_new = (up_xacc >= {1'b0, den}) && (up_wp != ow_last);
+
+(* use_ripple = 1 *) wire [12:0] up_threshold_delta={1'b0,up_xacc}-{2'b0,den};
+wire        up_need_new = !up_threshold_delta[12] && (up_wp != ow_last);
 wire        up_write_ok = !up_preload && !(up_need_new && (sf_empty || !sf_data_valid));
 
 assign      up_fill_consume = up_filling && (
@@ -863,22 +878,9 @@ always @(posedge clk or posedge rst) begin
                         scan_found_sector <= scan_sector;
                         scan_found_total  <= scan_found_total + 5'd1;
 
-                        if ((scan_found_total + 5'd1 >= scan_target_count) || (next_scan_sector_if_match > scan_max_sector)) begin
-                            scan_done        <= 1'b1;
-                            state            <= ST_IDLE;
-                            sd_sec_read_addr <= next_scan_sector_if_match;
-                            scan_sector      <= next_scan_sector_if_match;
-                        end else if (scan_hit_limit != 32'd0 &&
-                                     next_scan_sector_if_match >= scan_hit_limit) begin
-                            scan_done        <= 1'b1;
-                            scan_warn        <= 1'b1;
-                            state            <= ST_IDLE;
-                            sd_sec_read_addr <= next_scan_sector_if_match;
-                            scan_sector      <= next_scan_sector_if_match;
-                        end else begin
-                            sd_sec_read_addr <= next_scan_sector_if_match;
-                            scan_sector      <= next_scan_sector_if_match;
-                        end
+                        sd_sec_read_addr <= next_scan_sector_if_match;
+                        scan_sector <= next_scan_sector_if_match;
+                        state <= ST_SCAN_CHECK;
                     end else begin
                         if ((scan_sector >= scan_max_sector) ||
                             (scan_hit_limit != 32'd0 &&
@@ -892,6 +894,24 @@ always @(posedge clk or posedge rst) begin
                             scan_sector      <= next_scan_sector_if_miss;
                         end
                     end
+                end
+            end
+
+            ST_SCAN_CHECK: begin
+                state_code <= 4'd2;
+                sd_sec_read <= 1'b0;
+
+                if ((scan_found_total >= scan_target_count) ||
+                    (scan_sector > scan_max_sector)) begin
+                    scan_done <= 1'b1;
+                    state <= ST_IDLE;
+                end else if (scan_hit_limit != 32'd0 &&
+                             scan_sector >= scan_hit_limit) begin
+                    scan_done <= 1'b1;
+                    scan_warn <= 1'b1;
+                    state <= ST_IDLE;
+                end else begin
+                    state <= ST_SCAN;
                 end
             end
 

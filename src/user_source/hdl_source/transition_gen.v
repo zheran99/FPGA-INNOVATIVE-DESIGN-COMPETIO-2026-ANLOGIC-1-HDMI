@@ -26,7 +26,10 @@ module transition_gen #(
     output wire        O_de,
     output wire        O_hs,
     output wire        O_vs,
-    output wire [23:0] O_rgb
+    output wire [23:0] O_rgb,
+
+    output wire        O_tran_act,
+    output wire [7:0]  O_tran_prog
 );
 
     localparam LATENCY = 24;
@@ -115,6 +118,9 @@ module transition_gen #(
     reg [4:0]  frame_cnt;    // 0..TRAN_FRAMES-1
     reg [7:0]  progress;     // 帧级寄存器（原来是组合，每像素都乘一遍 时序爆）
 
+    assign O_tran_act  = trans_active;
+    assign O_tran_prog = progress;
+
     wire [8:0] nx_p1   = {1'b0, frame_cnt} + 6'd2;
     wire [8:0] nx_px13 = nx_p1 * 9'd13;
     wire [7:0] nx_prog = (nx_px13 > 9'd255) ? 8'd255 : nx_px13[7:0];
@@ -179,7 +185,16 @@ module transition_gen #(
 
     wire [3:0] bar_d       = ox[4] ? ox[3:0] : (4'd15 - ox[3:0]);   // 到条中心距离 0..15
     wire [3:0] bar_scale   = (8'd255 - progress) >> 4;              // 150，梯度摊平
-    wire [7:0] bar_dxscale = {4'b0, bar_d} * {4'b0, bar_scale};     // 0..225
+
+    wire [7:0] bar_pp0={4'd0,bar_d} & {8{bar_scale[0]}};
+    wire [7:0] bar_pp1={3'd0,bar_d,1'd0} & {8{bar_scale[1]}};
+    wire [7:0] bar_pp2={2'd0,bar_d,2'd0} & {8{bar_scale[2]}};
+    wire [7:0] bar_pp3={1'd0,bar_d,3'd0} & {8{bar_scale[3]}};
+    wire [7:0] bar_sum1=bar_pp0 ^ bar_pp1 ^ bar_pp2;
+    wire [7:0] bar_carry1=((bar_pp0 & bar_pp1) | (bar_pp0 & bar_pp2) | (bar_pp1 & bar_pp2)) << 1;
+    wire [7:0] bar_sum2=bar_sum1 ^ bar_carry1 ^ bar_pp3;
+    wire [7:0] bar_carry2=((bar_sum1 & bar_carry1) | (bar_sum1 & bar_pp3) | (bar_carry1 & bar_pp3)) << 1;
+    wire [7:0] bar_dxscale=bar_sum2 + bar_carry2; // 0..225
     wire [7:0] bar_w       = (progress >= bar_dxscale) ? (progress - bar_dxscale) : 8'd0;
 
     wire [8:0] chk_p2 = {1'b0, progress} << 1;                             // progress*2, 0..510

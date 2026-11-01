@@ -1,3 +1,7 @@
+`include "ring_frame_identity.vh"
+`include "frame_snapshot_cdc.vh"
+`include "scaled_shared_menu.vh"
+
 module top(
     input                       clk,
     input                       rst_n,          // KEY1 / A2（按下=0）
@@ -51,6 +55,8 @@ parameter SCAN_BMP_START = 32'd8192;
 
 parameter SCAN_WAV_START = 32'd95104;
 
+parameter SPEC_BLOB_START = 32'd185344;
+
 parameter SCAN_BMP_COUNT = 5'd9;
 
 parameter SCAN_HIT_LIMIT = 32'd120000;
@@ -82,6 +88,9 @@ wire        display_valid;
 wire [3:0]  state_code;
 wire [6:0]  seg_data_0;
 wire        sd_auto_play;      // 轮播开关状态（来自 sd_card_bmp）
+wire [6:0] ring_sd_identity;
+wire [4:0] ring_frame_ad;
+wire [1:0] ring_frame_slot;
 wire [4:0]  sd_img_idx;
 wire        sd_scan_warn;
 wire [4:0]  sd_img_found_cnt;
@@ -178,6 +187,32 @@ wire [7:0]  v_sd_sec_read_data;
 wire        v_sd_sec_read_dv;      // data_valid
 wire        v_sd_sec_read_end;
 
+wire        spec_read_req;
+wire [31:0] spec_sec_addr;
+wire        spec_owner_req;        // 本次 V 事务属于频谱
+wire        v_result_spec;         // mgr 回送的归属（已锁存）
+wire        v_req_mux;
+wire [31:0] v_addr_mux;
+wire        v_cancel_mux;
+wire        spec_mode;
+wire        v_dv_spec, v_end_spec, v_err_spec;
+
+wire        v_sd_error_raw;
+wire        v_sec_raw_dv, v_sec_raw_end;
+
+wire        spec_wr_en;
+wire [9:0]  spec_wr_addr;
+wire [7:0]  spec_wr_data;
+
+wire [13:0] spec_frame_c2;
+reg  [1:0]  spec_mode_sync;
+
+assign v_sd_sec_read_dv  = v_sec_raw_dv & ~v_result_spec;   // bmp
+assign v_sd_sec_read_end = v_sec_raw_end & ~v_result_spec;  // bmp
+assign v_dv_spec         = v_sec_raw_dv &  v_result_spec;   // 频谱 loader
+assign v_end_spec        = v_sec_raw_end & v_result_spec;
+assign v_err_spec        = v_sd_error_raw & v_result_spec;
+
 wire        a_sd_sec_read;
 wire [31:0] a_sd_sec_read_addr;
 
@@ -252,7 +287,8 @@ wire      audio_pause;            // sw[3]=1 暂停/静音（clk 域）
 
 reg       uart_pause_lvl;
 wire p7_visual_on;
-wire      audio_pause_eff = audio_pause | ~p7_visual_on | uart_pause_lvl;
+
+wire      audio_pause_eff = audio_pause | uart_pause_lvl;
 reg [1:0] a_pause_sync;
 wire      a_play_en = ~a_pause_sync[1];
 
@@ -356,6 +392,7 @@ sd_card_bmp #(
     .ctrl_diag_o        (sd_ctrl_diag),
     .auto_play_en_o    (sd_auto_play),
     .img_idx_o         (sd_img_idx),
+    .display_identity  (ring_sd_identity),
     .bmp_width         (16'd1280),
     .bmp_height        (16'd720),
     .display_valid     (display_valid),
@@ -380,7 +417,8 @@ sd_card_bmp #(
 );
 
 sd_card_mgr sd_card_mgr_m0 (
-    .V_sec_error(v_sd_error), .V_cancel(v_sd_cancel), .V_idle(v_sd_idle),
+    .V_sec_error(v_sd_error), .V_idle(v_sd_idle),
+    .V_sec_error_raw(v_sd_error_raw),
     .A_sec_error(a_sd_error), .A_cancel(1'b0),
     .A_owner_text(~a_txt_done), .A_result_text(a_result_text), .error_code(),
     .clk                    (sd_card_clk         ),
@@ -392,11 +430,14 @@ sd_card_mgr sd_card_mgr_m0 (
     .SD_MISO                (sd_miso             ),
     .sd_init_done           (sd_init_done        ),
 
-    .V_sec_read             (v_sd_sec_read       ),
-    .V_sec_read_addr        (v_sd_sec_read_addr  ),
-    .V_sec_read_data        (v_sd_sec_read_data  ),
-    .V_sec_read_data_valid  (v_sd_sec_read_dv    ),
-    .V_sec_read_end         (v_sd_sec_read_end   ),
+    .V_sec_read             (v_req_mux          ),
+    .V_sec_read_addr        (v_addr_mux         ),
+    .V_sec_read_data        (v_sd_sec_read_data ),
+    .V_sec_read_data_valid  (v_sec_raw_dv       ),
+    .V_sec_read_end         (v_sec_raw_end      ),
+    .V_owner_spec           (spec_owner_req     ),
+    .V_result_spec          (v_result_spec      ),
+    .V_cancel               (v_cancel_mux       ),
 
     .A_sec_read             (a_mux_sec_read      ),
     .A_sec_read_addr        (a_mux_sec_addr      ),
@@ -404,6 +445,25 @@ sd_card_mgr sd_card_mgr_m0 (
     .A_sec_read_data_valid  (a_sd_sec_read_dv    ),
     .A_sec_read_end         (a_sd_sec_read_end   )
 );
+
+assign v_req_mux      = v_sd_sec_read | spec_read_req;
+
+reg  [3:0] v_steal_cnt;      // 每完成一个 V 扇区减 1，到 0 就让频谱插队
+wire       v_steal_now = spec_read_req & (v_steal_cnt == 4'd0);
+
+always @(posedge sd_card_clk or posedge rst_sd) begin
+    if (rst_sd)
+        v_steal_cnt <= 4'd15;
+    else if (v_sec_raw_end || v_sd_error_raw)
+
+        v_steal_cnt <= (v_steal_cnt == 4'd0) ? 4'd15 : (v_steal_cnt - 4'd1);
+end
+
+assign v_addr_mux     = (v_steal_now || !v_sd_sec_read) ? spec_sec_addr
+                                                        : v_sd_sec_read_addr;
+assign spec_owner_req = v_steal_now | (~v_sd_sec_read & spec_read_req);
+
+assign v_cancel_mux   = v_sd_cancel;
 
 always @(posedge sd_card_clk or posedge rst_sd) begin
     if (rst_sd)
@@ -571,6 +631,7 @@ always @(posedge video_clk or posedge rst_pixel) begin
         pause_vid_sync <= {pause_vid_sync[0], audio_pause_eff};
 end
 
+wire a_sample_advance;
 audio_stream_gen #(
     .CLK_FREQ_HZ    (75_000_000),
     .SAMPLE_RATE_HZ (48_000)
@@ -588,6 +649,7 @@ audio_stream_gen #(
 
     .I_mute               (pause_vid_sync[1] || audio_refill_vid[1] || audio_flush_rd[1]), // sw[3] 真暂停（冻结时间轴）
     .O_underrun           (a_underrun        ),
+    .O_sample_advance     (a_sample_advance  ),
     .O_sample_cnt         (a_sample_cnt      )
 );
 
@@ -771,7 +833,8 @@ wire [7:0]  u_wr_val;
 wire        u_rset;
 wire        u_p5_wr, u_p6_wr, u_p7_wr;     // p5_reg / p6_reg / p7_reg
 wire [2:0]  u_p5_sel;
-wire [1:0]  u_p5_val, u_p6_val, u_p7_sel, u_p7_val;
+wire [1:0]  u_p5_val, u_p7_sel, u_p7_val;
+wire [2:0]  u_p6_val;              // 3 位：广告背景 7 档
 wire [2:0] u_p6_sel;
 wire        u_pause_set, u_pause_clr;
 wire        u_next_pulse, u_prev_pulse, u_auto_set;
@@ -796,21 +859,36 @@ touch_control_bus touch_arbiter(.enabled(mode_oh[7]),.uart_busy(t_uart_busy),
     .playback_ready(t_play_gap==0 && !uart_next_lvl && !uart_prev_lvl && !uart_auto_lvl),
     .valid(t_valid),.target(t_target),.ready(t_ready),.base_wr(t_base_wr),
     .sub_wr(t_sub_wr),.ad_wr(t_ad_wr),.spectrum_wr(t_spectrum_wr),.play_wr(t_play_wr));
-wire [247:0] t_values;
+wire [255:0] t_values;
 
-assign t_values={p_irvol, p_irsat, p_ircon, p_irn,
-    {7'd0,p7_visual_on},{6'd0,p6_logo_size},{audio_pause_eff,aud_stat_c2,a_wav_state_code_c2},8'd0,{7'd0,p7_horizontal},{7'd0,p7_wave_on},
-    {7'd0,p6_ad_layout},{6'd0,p6_ad_language},{6'd0,p6_ad_bg},{7'd0,p6_ad_on},{6'd0,p6_logo_sel},
+reg [3:0] boot_flags_c1, boot_flags_c2;
+always @(posedge clk or negedge rst_ref_n) begin
+    if (!rst_ref_n) begin boot_flags_c1 <= 4'd0; boot_flags_c2 <= 4'd0; end
+    else begin
+        boot_flags_c1 <= {display_valid,Sdr_init_done,sd_init_done,sd_ctrl_diag[1]};
+        boot_flags_c2 <= boot_flags_c1;
+    end
+end
+assign t_values={{5'd0,(p7_visual_mode==2 ? 3'd4 : {1'b0,p7_shape})},p_irvol, p_irsat, p_ircon, p_irn,
+    {6'd0,p7_visual_mode},{6'd0,p6_logo_size},{boot_flags_c2,v_state_code_c2},8'd0,{7'd0,p7_horizontal},{7'd0,p7_wave_on},
+    {7'd0,p6_ad_layout},{6'd0,p6_ad_language},{5'd0,p6_ad_bg},{7'd0,p6_ad_on},{6'd0,p6_logo_sel},
     {7'd0,p5_monitor},{7'd0,p5_size},{6'd0,p5_bg},{6'd0,p5_pos},{6'd0,p5_mode},
     {7'd0,p5_sub_on},{7'd0,p_tran_en},{5'd0,p_tran_type},
     {7'd0,audio_pause_eff},{7'd0,sd_auto_play_c2},8'd0,8'd0,p_vol,p_sat,p_con,p_bri};
-touch_panel touch_panel_m0(
+wire [12:0] shared_touch_text_addr;
+wire [7:0] shared_touch_text_bits;
+wire [11:0] shared_touch_font_addr;
+wire [15:0] shared_touch_font_bits;
+wire shared_legacy_suppress;
+touch_panel #(.SHARED_FONT(1),.SHARED_TEXT(1)) touch_panel_m0(
     .clk(clk),.rst_n(rst_ref_n),.enabled(mode_oh[7]),.values(t_values),
     .mode(mode_num),.nav_keys({key_held[2],key_held[0]}),
     .valid(t_valid),.ready(t_ready),.target(t_target),.field(t_field),.value(t_value),
     .tft_cs_n(tft_cs_n),.tft_reset_n(tft_reset_n),.tft_dc(tft_dc),.tft_mosi(tft_mosi),.tft_sck(tft_sck),
     .touch_cs_n(touch_cs_n),.touch_mosi(touch_mosi),.touch_sck(touch_sck),
-    .touch_miso(touch_miso),.touch_irq_n(touch_irq_n));
+    .touch_miso(touch_miso),.touch_irq_n(touch_irq_n),
+    .O_shared_text_addr(shared_touch_text_addr),.I_shared_text_bits(shared_touch_text_bits),
+    .O_shared_font_addr(shared_touch_font_addr),.I_shared_font_bits(shared_touch_font_bits));
 
 wire ir_dim;
 ir_brightness #(.ACTIVE_LOW(1'b0)) ir_bright_m0(
@@ -912,21 +990,40 @@ param_reg param_reg_m0 (
 
 wire p7_wave_on;
 wire [1:0] p7_item;
+wire [1:0] p7_shape;
+wire p7_import_mode;
+wire [1:0] p7_visual_mode;
+reg [1:0] p7_import_sync;
+reg [1:0] p7_mode_meta,p7_mode_sync;
 wire p7_horizontal;
 p7_reg p7_reg_m0 (
     .I_clk(clk), .I_rst_n(rst_ref_n), .I_key_short(key_short),
     .I_mode_oh(mode_oh), .O_wave_on(p7_wave_on),
-    .O_visual_on(p7_visual_on), .O_item(p7_item), .O_horizontal(p7_horizontal),
+    .O_visual_on(p7_visual_on), .O_item(p7_item), .O_horizontal(p7_horizontal), .O_shape(p7_shape), .O_import_mode(p7_import_mode), .O_visual_mode(p7_visual_mode),
 
-    .I_u_wr(u_p7_wr | t_spectrum_wr), .I_u_sel(u_p7_wr ? u_p7_sel : t_field[1:0]), .I_u_val(u_p7_wr ? u_p7_val : t_value[1:0]),
+    .I_u_wr(u_p7_wr | t_spectrum_wr), .I_u_sel(u_p7_wr ? u_p7_sel : t_field[1:0]), .I_u_val(u_p7_wr ? {1'b0,u_p7_val} : t_value[2:0]),
     .I_u_rst(u_rset)
 );
-wire p7_wave_en = ~mode_oh[0] & p7_wave_on & p7_visual_on;
+
+assign spec_mode = p7_import_sync[1];
+wire p7_wave_en = ~mode_oh[0] & p7_wave_on;
 reg [1:0] p7_en_sync;
+reg [1:0] p7_shape_meta,p7_shape_sync;
+always @(posedge video_clk or posedge rst_pixel)begin
+    if(rst_pixel)begin p7_import_sync<=0;p7_mode_meta<=1;p7_mode_sync<=1;end
+    else begin
+        p7_import_sync<={p7_import_sync[0],p7_import_mode};
+        p7_mode_meta<=p7_visual_mode;p7_mode_sync<=p7_mode_meta;
+    end
+end
 reg [5:0] p7_ui_meta,p7_ui_sync;
 always @(posedge video_clk or posedge rst_pixel) begin
     if (rst_pixel) p7_en_sync <= 2'b00;
     else p7_en_sync <= {p7_en_sync[0], p7_wave_en};
+end
+always @(posedge video_clk or posedge rst_pixel) begin
+    if (rst_pixel) begin p7_shape_meta<=2'd0; p7_shape_sync<=2'd0; end
+    else begin p7_shape_meta<=p7_shape; p7_shape_sync<=p7_shape_meta; end
 end
 always @(posedge video_clk or posedge rst_pixel) begin
     if (rst_pixel) begin p7_ui_meta<=6'b001100; p7_ui_sync<=6'b001100; end
@@ -963,7 +1060,8 @@ p5_reg p5_reg_m0 (
 // key_m 切换当前项的状态
 
 wire [2:0] p6_item;
-wire [1:0] p6_logo_sel, p6_logo_mode, p6_ad_bg;
+wire [1:0] p6_logo_sel, p6_logo_mode;
+wire [2:0] p6_ad_bg;                  // 3 位：背景 7 档（0..6）
 wire       p6_logo_en, p6_ad_on;
 wire [1:0] p6_ad_language;
 wire p6_ad_layout;
@@ -987,7 +1085,7 @@ p6_reg p6_reg_m0 (
     .O_changed    (              ),    // 未使用（数码管不显示 P6 状态）
     .I_u_wr       (u_p6_wr | t_ad_wr),
     .I_u_sel      (u_p6_wr ? u_p6_sel : t_field[2:0]),
-    .I_u_val      (u_p6_wr ? u_p6_val : t_value[1:0]),
+    .I_u_val      (u_p6_wr ? u_p6_val : t_value[2:0]),
     .I_u_rst      (u_rset)
 );
 
@@ -1107,7 +1205,7 @@ always @(posedge clk or negedge rst_ref_n) begin
     else if(t_play_wr && t_field==4'd3) uart_pause_lvl<=t_value[0];
 end
 
-seg_status seg_status_m0 (
+seg_status #(.OUTPUT_TOKENS(1)) seg_status_m0 (
     .I_clk          (clk),
     .I_rst_n        (rst_ref_n),
     .I_mode_num     (mode_num),
@@ -1141,7 +1239,7 @@ seg_status seg_status_m0 (
     .O_seg_0        (st_seg_0)
 );
 
-seg_scan seg_scan_m0(
+seg_scan #(.INPUT_TOKENS(1)) seg_scan_m0(
     .clk               (clk),
     .rst_n             (rst_ref_n),
     .seg_sel           (seg_sel),
@@ -1182,6 +1280,9 @@ always @(posedge video_clk or posedge rst_pixel) begin
 end
 wire tran_start_v = tgl_v2 ^ tgl_v3;   // 单拍脉冲
 
+wire       tran_act_v;
+wire [7:0] tran_prog_v;
+
 transition_gen transition_gen_m0(
     .I_clk          (video_clk),
     .I_rst          (rst_pixel),
@@ -1199,7 +1300,9 @@ transition_gen transition_gen_m0(
     .O_de           (de),
     .O_hs           (hs),
     .O_vs           (vs),
-    .O_rgb          (vout_data_raw)
+    .O_rgb          (vout_data_raw),
+    .O_tran_act     (tran_act_v),
+    .O_tran_prog    (tran_prog_v)
 );
 
 reg [7:0] pb_c1, pb_c2;      // bri 同步（clk video_clk）
@@ -1250,15 +1353,74 @@ param_effect param_effect_m0 (
 
 wire [23:0] wave_rgb;
 wire wave_de, wave_hs, wave_vs;
+wire [23:0] specA_rgb;
+wire specA_de, specA_hs, specA_vs;
+
+ring_frame_identity ring_identity(.src_clk(sd_card_clk),.src_rst(rst_sd),
+    .src_identity(ring_sd_identity),.video_clk(video_clk),.video_rst(rst_pixel),
+    .read_request(video_read_req),.frame_slot(ring_frame_slot),.frame_ad(ring_frame_ad));
 audio_spectrum_overlay audio_wave_overlay_m0 (
     .I_clk(video_clk), .I_rst(rst_pixel),
     .I_sample_valid(volume_valid), .I_sample_left(volume_left),
-    .I_en(p7_en_sync[1]),
+    .I_en(p7_en_sync[1] & p7_ui_sync[2] & ~spec_mode),
     .I_horizontal(p7_ui_sync[0]),
+    .I_shape(p7_shape_sync),
+    .I_ad_id(ring_frame_ad),.I_transition_active(tran_act_v),
     .O_debug_active(), .O_debug_bank(),
     .I_de(de_eff), .I_hs(hs_eff), .I_vs(vs_eff), .I_rgb(vout_effected),
-    .O_de(wave_de), .O_hs(wave_hs), .O_vs(wave_vs), .O_rgb(wave_rgb)
+    .O_de(specA_de), .O_hs(specA_hs), .O_vs(specA_vs), .O_rgb(specA_rgb)
 );
+
+wire spec_commit_toggle;
+reg [1:0] spec_commit_sync;
+reg spec_front_bank,spec_front_valid,spec_front_vs;
+always @(posedge video_clk or posedge rst_pixel)begin
+    if(rst_pixel)begin spec_commit_sync<=0;spec_front_bank<=0;spec_front_valid<=0;spec_front_vs<=0;end
+    else begin
+        spec_commit_sync<={spec_commit_sync[0],spec_commit_toggle};spec_front_vs<=vs_eff;
+        if(vs_eff && !spec_front_vs && spec_commit_sync[1]!=spec_front_bank)begin
+            spec_front_bank<=spec_commit_sync[1];spec_front_valid<=1;
+        end
+    end
+end
+wire spec_flow_en=p7_en_sync[1] & p7_ui_sync[2] & spec_mode & spec_front_valid;
+wire [9:0]  spec_lv_addr;
+wire [7:0]  spec_lv_data;
+
+spectrum_level_ram u_spec_lv_ram (
+    .I_wclk  (sd_card_clk),
+    .I_wen   (spec_wr_en),
+    .I_waddr (spec_wr_addr),
+    .I_wdata (spec_wr_data),
+    .I_rclk  (video_clk),
+    .I_raddr ({2'd0,spec_front_bank,spec_lv_addr[6:0]}),
+    .O_rdata (spec_lv_data)
+);
+
+wire [23:0] specB_rgb;
+wire specB_de, specB_hs, specB_vs;
+audio_spectrum_flow u_spec_flow (
+    .I_clk(video_clk), .I_rst(rst_pixel),
+    .I_en(spec_flow_en),
+    .I_de(de_eff), .I_hs(hs_eff), .I_vs(vs_eff), .I_rgb(vout_effected),
+    .O_de(specB_de), .O_hs(specB_hs), .O_vs(specB_vs), .O_rgb(specB_rgb),
+    .I_frame(sub_frame_now[13:0]),
+    .O_lv_addr(spec_lv_addr), .I_lv_data(spec_lv_data)
+);
+
+reg [26:0] specB_aligned;
+reg spec_mux_vs,spec_mux_active;
+reg [3:0] spec_mux_pipe;
+always @(posedge video_clk or posedge rst_pixel)begin
+    if(rst_pixel)begin specB_aligned<=0;spec_mux_vs<=0;spec_mux_active<=0;spec_mux_pipe<=0;end
+    else begin
+        specB_aligned<={specB_de,specB_hs,specB_vs,specB_rgb};
+        spec_mux_vs<=vs_eff;
+        if(vs_eff && !spec_mux_vs)spec_mux_active<=spec_mode;
+        spec_mux_pipe<={spec_mux_pipe[2:0],(vs_eff && !spec_mux_vs) ? spec_mode : spec_mux_active};
+    end
+end
+assign {wave_de,wave_hs,wave_vs,wave_rgb}=spec_mux_pipe[3] ? specB_aligned : {specA_de,specA_hs,specA_vs,specA_rgb};
 
 reg        p5_on_c1,  p5_on_c2;
 reg        p5_sz_c1,  p5_sz_c2;
@@ -1299,31 +1461,36 @@ always @(posedge video_clk or posedge rst_pixel) begin
 end
 
 reg        mon_undr_c1, mon_undr_c2;
-reg [3:0]  mon_afsm_c1, mon_afsm_c2;
-reg [3:0]  mon_vfsm_c1, mon_vfsm_c2;
 reg [2:0]  mon_mode_c1, mon_mode_c2;
 reg [4:0]  mon_img_c1,  mon_img_c2;
+
+reg        mon_auto_c1, mon_auto_c2;
+reg [4:0]  mon_tot_c1,  mon_tot_c2;
 
 always @(posedge video_clk or posedge rst_pixel) begin
     if (rst_pixel) begin
         mon_undr_c1 <= 1'b0; mon_undr_c2 <= 1'b0;
-        mon_afsm_c1 <= 4'd0; mon_afsm_c2 <= 4'd0;
-        mon_vfsm_c1 <= 4'd0; mon_vfsm_c2 <= 4'd0;
         mon_mode_c1 <= 3'd0; mon_mode_c2 <= 3'd0;
         mon_img_c1  <= 5'd0; mon_img_c2  <= 5'd0;
+        mon_auto_c1 <= 1'b0; mon_auto_c2 <= 1'b0;
+        mon_tot_c1  <= 5'd0; mon_tot_c2  <= 5'd0;
     end else begin
         mon_undr_c1 <= a_underrun;
         mon_undr_c2 <= mon_undr_c1;
-        mon_afsm_c1 <= a_wav_state_code_c2;     // wav_read FSM 号（已在 clk 域）
-        mon_afsm_c2 <= mon_afsm_c1;
-        mon_vfsm_c1 <= v_state_code_c2;         // bmp_read FSM 号（已在 clk 域）
-        mon_vfsm_c2 <= mon_vfsm_c1;
         mon_mode_c1 <= mode_num;                // clk 域模式号
         mon_mode_c2 <= mon_mode_c1;
         mon_img_c1  <= sd_img_idx_c2[4:0];      // 图片序号（已在 clk 域）
         mon_img_c2  <= mon_img_c1;
+        mon_auto_c1 <= sd_auto_play_c2;         // 轮播开关（clk 域）
+        mon_auto_c2 <= mon_auto_c1;
+        mon_tot_c1  <= sd_img_found_c2;         // 卡上总张数（clk 域）
+        mon_tot_c2  <= mon_tot_c1;
     end
 end
+
+// "无交互"与"不影响是否轮播"
+
+wire p1_image_only_c = (mon_mode_c2 == 3'd0);   // video_clk 域：1 = P1（只显示图片）
 
 // 字幕 ROM 接口
 wire [9:0]  sub_cue_idx;
@@ -1368,20 +1535,21 @@ sub_font_rom u_sub_font (
 
 wire [23:0] sub_rgb;
 wire        sub_de, sub_hs, sub_vs;
-subtitle_engine #(.LOOP_SAMPLE_COUNT(AUDIO_TOTAL_SAMPLES)) subtitle_engine_m0 (
+subtitle_engine #(.LOOP_SAMPLE_COUNT(AUDIO_TOTAL_SAMPLES), .USE_SAMPLE_PULSE(1)) subtitle_engine_m0 (
     .I_clk        (video_clk),
     .I_rst        (rst_pixel),
     .I_de         (wave_de),
     .I_hs         (wave_hs),
     .I_vs         (wave_vs),
     .I_rgb        (wave_rgb),
+    .I_sample_advance(a_sample_advance),
     .I_sample_cnt (a_sample_cnt),        // video_clk 域，32 位，无需 CDC
-    .I_sub_on     (p5_on_c2 && text_commit_vid[1]),
+    .I_sub_on     (p5_on_c2 && text_commit_vid[1] && ~p1_image_only_c),
     .I_mode       (p5_md_c2),
     .I_pos        (p5_ps_c2),
     .I_bg         (p5_bg_c2),
     .I_size       (p5_sz_c2),
-    .I_preview    (p5_en_c2 && text_commit_vid[1]),            // P5 模式下强制预览（便于调设置）
+    .I_preview    (p5_en_c2 && p5_on_c2 && text_commit_vid[1]),            // P5 模式下强制预览（便于调设置）
 
     .I_loop_pulse (audio_flush_rd[1]),
     .I_loop_frame (AUDIO_TOTAL_FRAME),
@@ -1401,6 +1569,39 @@ subtitle_engine #(.LOOP_SAMPLE_COUNT(AUDIO_TOTAL_SAMPLES)) subtitle_engine_m0 (
     .O_rgb        (sub_rgb)
 );
 
+frame_snapshot_cdc #(.WIDTH(14)) spec_frame_bridge(
+    .source_clk(video_clk),.source_rst(rst_pixel),.source_data(sub_frame_now[13:0]),
+    .dest_clk(sd_card_clk),.dest_rst(rst_sd),.dest_data(spec_frame_c2));
+always @(posedge sd_card_clk or posedge rst_sd) begin
+    if (rst_sd) begin
+        spec_mode_sync <= 2'b00;
+    end else begin
+        spec_mode_sync <= {spec_mode_sync[0], spec_mode};
+    end
+end
+
+spectrum_blob_loader #(
+    .BLOB_START_SECTOR (SPEC_BLOB_START)
+) u_spec_loader (
+    .I_sd_clk        (sd_card_clk),
+    .I_sd_rst        (rst_sd),
+    .I_en            (spec_mode_sync[1]),
+    .I_frame_no      (spec_frame_c2),
+
+    .O_spec_read     (spec_read_req),
+    .O_spec_addr     (spec_sec_addr),
+    .I_sd_data       (v_sd_sec_read_data),
+    .I_sd_dv         (v_dv_spec),
+    .I_sd_end        (v_end_spec),
+    .I_sd_err        (v_err_spec),
+    .I_sd_init_done  (sd_init_done),
+
+    .O_wr_addr       (spec_wr_addr),
+    .O_wr_data       (spec_wr_data),
+    .O_wr_en         (spec_wr_en),
+    .O_commit_toggle (spec_commit_toggle),.I_commit_ack(spec_front_bank)
+);
+
 reg [1:0] p6_lm_c1, p6_lm_c2;      // 弹移/静止
 reg [2:0] p6_it_c1, p6_it_c2;      // 设置项（面板用）
 reg [1:0] p6_ls_c1, p6_ls_c2;      // 标志状态（面板显示 关/开/动）
@@ -1408,7 +1609,7 @@ reg       p6_ad_c1, p6_ad_c2;      // 广告开关（面板显示 + 广告文字
 reg [1:0] p6_lang_c1, p6_lang_c2;
 reg p6_layout_c1, p6_layout_c2;
 reg [1:0] p6_size_c1,p6_size_c2;
-reg [1:0] p6_bg_c1, p6_bg_c2;      // 广告文字背景（0=无 1=半透 2=实底）
+reg [2:0] p6_bg_c1, p6_bg_c2;
 reg       p6_sh_c1, p6_sh_c2;      // Logo 是否叠加（模式 ∩ 标志开关）
 reg       p6_md_c1, p6_md_c2;      // 是否处于 P6 模式（面板显示门控）
 
@@ -1427,7 +1628,7 @@ always @(posedge video_clk or posedge rst_pixel) begin
         p6_it_c1 <= 2'd0; p6_it_c2 <= 2'd0;
         p6_ls_c1 <= 2'd0; p6_ls_c2 <= 2'd0;
         p6_ad_c1 <= 1'b0; p6_ad_c2 <= 1'b0;
-        p6_bg_c1 <= 2'd0; p6_bg_c2 <= 2'd0;
+        p6_bg_c1 <= 3'd0; p6_bg_c2 <= 3'd0;
         p6_size_c1<=1;p6_size_c2<=1;
         p6_lang_c1<=0;p6_lang_c2<=0;p6_layout_c1<=0;p6_layout_c2<=0;
         p6_sh_c1 <= 1'b0; p6_sh_c2 <= 1'b0;
@@ -1481,112 +1682,19 @@ logo_overlay logo_overlay_m0 (
     .O_rgb      (logo_rgb)
 );
 
-wire [23:0] pn5_rgb;
-wire        pn5_de, pn5_hs, pn5_vs;
-wire [23:0] pn6_rgb;
-wire        pn6_de, pn6_hs, pn6_vs;
-
-wire [5:0] cn5_idx;
-wire [6:0] cn6_idx;
-wire [4:0]  cn5_row, cn6_row;
-wire [6:0] cn7_idx;
-wire [4:0] cn7_row;
+wire [5:0] tl_idx;
+wire [4:0] tl_row;
+wire tl_label_on;
 wire [31:0] cn_font_word;
-
-wire [5:0]  tl_idx;
-wire [4:0]  tl_row;
-wire        tl_label_on;
-wire [5:0] cn3_idx;
-wire [4:0] cn3_row;
 reg p3_en_c1,p3_en_c2;
-always @(posedge video_clk or posedge rst_pixel) begin
+always @(posedge video_clk or posedge rst_pixel)begin
     if(rst_pixel)begin p3_en_c1<=0;p3_en_c2<=0;end
     else begin p3_en_c1<=mode_num==3'd2;p3_en_c2<=p3_en_c1;end
 end
-
-wire font_p3=p3_en_c2;
-wire font_tl=!p3_en_c2 && tl_label_on;
-wire font_p7=!p3_en_c2 && !tl_label_on && p7_ui_sync[5];
-wire font_p6=!p3_en_c2 && !tl_label_on && !p7_ui_sync[5] && p6_md_c2;
-wire font_p5=!p3_en_c2 && !tl_label_on && !p7_ui_sync[5] && !p6_md_c2;
-wire [6:0] cn_font_idx=({7{font_p3}} & {1'b0,cn3_idx}) | ({7{font_tl}} & {1'b0,tl_idx}) |
-    ({7{font_p7}} & cn7_idx) | ({7{font_p6}} & cn6_idx) | ({7{font_p5}} & {1'b0,cn5_idx});
-wire [4:0] cn_font_row=({5{font_p3}} & cn3_row) | ({5{font_tl}} & tl_row) |
-    ({5{font_p7}} & cn7_row) | ({5{font_p6}} & cn6_row) | ({5{font_p5}} & cn5_row);
-
-p5_cn_font_rom u_cn_font (
-    .clk       (video_clk),
-    .char_idx  (cn_font_idx),      // 6 位索引（模式 mux 后）
-    .row       (cn_font_row),      // 5 位行号（模式 mux 后）
-    .rom_row   (cn_font_word)      // 1 拍后有效 与面板的 D3 同拍
-);
-
-p5_panel p5_panel_m0 (
-    .I_clk      (video_clk),
-    .I_rst      (rst_pixel),
-    .I_de       (logo_de),
-    .I_hs       (logo_hs),
-    .I_vs       (logo_vs),
-    .I_rgb      (logo_rgb),
-    .I_panel_en (p5_en_c2),              // 仅 P5
-    .I_item     (p5_it_c2),
-    .I_sub_on   (p5_on_c2),
-    .I_mode     (p5_md_c2),
-    .I_pos      (p5_ps_c2),
-    .I_bg       (p5_bg_c2),
-    .I_size     (p5_sz_c2),
-    .I_monitor  (p5_mo_c2),
-    .O_font_idx (cn5_idx),
-    .O_font_row (cn5_row),
-    .I_font_word(cn_font_word),
-    .O_de       (pn5_de),
-    .O_hs       (pn5_hs),
-    .O_vs       (pn5_vs),
-    .O_rgb      (pn5_rgb)
-);
-
-p6_panel p6_panel_m0 (
-    .I_clk      (video_clk),
-    .I_rst      (rst_pixel),
-    .I_de       (logo_de),
-    .I_hs       (logo_hs),
-    .I_vs       (logo_vs),
-    .I_rgb      (logo_rgb),
-    .I_panel_en (p6_md_c2),              // 仅 P6
-    .I_item     (p6_it_c2),
-    .I_logo_sel (p6_ls_c2),
-    .I_ad_on    (p6_ad_c2),
-    .I_ad_bg    (p6_bg_c2),
-    .I_language (p6_lang_c2),
-    .I_layout   (p6_layout_c2),
-    .I_logo_size(p6_size_c2),
-    .O_font_idx (cn6_idx),
-    .O_font_row (cn6_row),
-    .I_font_word(cn_font_word),
-    .O_de       (pn6_de),
-    .O_hs       (pn6_hs),
-    .O_vs       (pn6_vs),
-    .O_rgb      (pn6_rgb)
-);
-
-wire [23:0] p5_rgb    = p6_md_c2 ? pn6_rgb : pn5_rgb;
-wire        p5p_de    = p6_md_c2 ? pn6_de  : pn5_de;
-wire        p5p_hs    = p6_md_c2 ? pn6_hs  : pn5_hs;
-wire        p5p_vs    = p6_md_c2 ? pn6_vs  : pn5_vs;
-wire [23:0] pn7_rgb;
-wire pn7_de,pn7_hs,pn7_vs;
-p7_panel p7_panel_m0 (
-    .I_clk(video_clk),.I_rst(rst_pixel),
-    .I_de(logo_de),.I_hs(logo_hs),.I_vs(logo_vs),.I_rgb(logo_rgb),
-    .I_panel_en(p7_ui_sync[5] & ~tl_label_on),.I_item(p7_ui_sync[4:3]),.I_visual_on(p7_ui_sync[2]),
-    .I_on(p7_ui_sync[1]),.I_horizontal(p7_ui_sync[0]),
-    .O_font_idx(cn7_idx),.O_font_row(cn7_row),.I_font_word(cn_font_word),
-    .O_de(pn7_de),.O_hs(pn7_hs),.O_vs(pn7_vs),.O_rgb(pn7_rgb)
-);
-wire [23:0] menu_rgb=p7_ui_sync[5] ? pn7_rgb : p5_rgb;
-wire menu_de=p7_ui_sync[5] ? pn7_de : p5p_de;
-wire menu_hs=p7_ui_sync[5] ? pn7_hs : p5p_hs;
-wire menu_vs=p7_ui_sync[5] ? pn7_vs : p5p_vs;
+wire [23:0] menu_rgb;
+wire menu_de,menu_hs,menu_vs;
+scaled_menu_delay old_menu_latency(video_clk,rst_pixel,logo_de,logo_hs,logo_vs,logo_rgb,
+                                    menu_de,menu_hs,menu_vs,menu_rgb);
 
 wire [23:0] ad_rgb;
 wire        ad_de, ad_hs, ad_vs;
@@ -1603,8 +1711,10 @@ ad_text ad_text_m0 (
     .I_hs   (menu_hs),
     .I_vs   (menu_vs),
     .I_rgb  (menu_rgb),
-    .I_en   (p6_ad_c2 && text_commit_vid[1]),
+    .I_en   (p6_ad_c2 && text_commit_vid[1] && ~p1_image_only_c),
     .I_bg   (p6_bg_c2),
+
+    .I_tran_act (tran_act_v), .I_tran_prog (tran_prog_v),
     .I_img  (ad_img_c2),                // 图片序号 1..9（>9 不显示）
 
     .I_txt_wr_clk    (sd_card_clk),
@@ -1625,7 +1735,7 @@ wire        tl_de, tl_hs, tl_vs;
 
 wire [23:0] tl_legacy_rgb, p3_rgb;
 tran_label tran_label_m0 (
-    .I_suppress  (p3_en_c2),
+    .I_suppress  (shared_legacy_suppress),
     .I_clk       (video_clk),
     .I_rst       (rst_pixel),
     .I_de        (ad_de),
@@ -1642,13 +1752,7 @@ tran_label tran_label_m0 (
     .O_vs        (tl_vs),
     .O_rgb       (tl_legacy_rgb)
 );
-p3_panel p3_panel_m0 (
-    .I_clk(video_clk),.I_rst(rst_pixel),.I_de(ad_de),.I_hs(ad_hs),.I_vs(ad_vs),.I_rgb(ad_rgb),
-    .I_panel_en(p3_en_c2),.I_on(te_c2),.I_type(tt_c2),
-    .O_font_idx(cn3_idx),.O_font_row(cn3_row),.I_font_word(cn_font_word),
-    .O_de(),.O_hs(),.O_vs(),.O_rgb(p3_rgb)
-);
-assign tl_rgb=p3_en_c2 ? p3_rgb : tl_legacy_rgb;
+assign tl_rgb=tl_legacy_rgb;
 
 reg        pan_en_c1, pan_en_c2;
 reg [2:0]  pan_it_c1, pan_it_c2;
@@ -1688,23 +1792,20 @@ audio_volume audio_volume_m0 (
 wire [23:0] panel_rgb;
 wire        panel_de, panel_hs, panel_vs;
 
-osd_param_panel osd_param_panel_m0 (
-    .I_clk       (video_clk),
-    .I_rst       (rst_pixel),
-    .I_de        (tl_de),                // 转场字幕的输出（管线再 +4 拍 共 35 拍）
-    .I_hs        (tl_hs),
-    .I_vs        (tl_vs),
-    .I_rgb       (tl_rgb),
-    .I_panel_en  (pan_en_c2),            // 已同步到 video_clk 域
-    .I_sel_idx   (pan_it_c2),            // P4 当前选中项 0..5
-    .I_bri       (pan_br_c2),
-    .I_con       (pan_co_c2),
-    .I_sat       (pan_sa_c2),
-    .I_vol       (pan_vo_c2),
-    .O_de        (panel_de),             // 延迟 4 拍后的 de
-    .O_hs        (panel_hs),
-    .O_vs        (panel_vs),
-    .O_rgb       (panel_rgb)
+scaled_shared_menu shared_menu(
+    .touch_text_addr(shared_touch_text_addr),.touch_text_bits(shared_touch_text_bits),
+    .touch_clk(clk),.touch_font_addr(shared_touch_font_addr),.touch_font_bits(shared_touch_font_bits),
+    .legacy_suppress(shared_legacy_suppress),
+    .clk(video_clk),.rst(rst_pixel),.de(tl_de),.hs(tl_hs),.vs(tl_vs),.rgb(tl_rgb),
+    .mode(mon_mode_c2),.item4(pan_it_c2),.item5(p5_it_c2),.item6(p6_it_c2),.item7(p7_ui_sync[4:3]),
+    .shape(p7_shape_sync),.bri(pan_br_c2),.con(pan_co_c2),.sat(pan_sa_c2),.vol(pan_vo_c2),
+    .transition_type(tt_c2),.transition_on(te_c2),.sub_on(p5_on_c2),.sub_size(p5_sz_c2),.monitor_on(p5_mo_c2),
+    .sub_mode(p5_md_c2),.sub_pos(p5_ps_c2),.sub_bg(p5_bg_c2),.logo_sel(p6_ls_c2),.logo_size(p6_size_c2),
+    .ad_bg(p6_bg_c2),.language(p6_lang_c2),.ad_on(p6_ad_c2),.ad_layout(p6_layout_c2),
+    .wave_on(p7_ui_sync[1]),.horizontal(p7_ui_sync[0]),.visual_on(p7_ui_sync[2]),.visual_mode(p7_mode_sync),
+    .pause_audio(pause_vid_sync[1]),.audio_status(aud_stat_v),
+    .legacy_idx(tl_idx),.legacy_row(tl_row),.legacy_word(cn_font_word),
+    .ode(panel_de),.ohs(panel_hs),.ovs(panel_vs),.orgb(panel_rgb)
 );
 
 wire [23:0] mon_rgb;
@@ -1731,13 +1832,15 @@ sync_monitor sync_monitor_m0 (
     .I_rgb          (panel_rgb),
     .I_en           (mon_en),
     .I_frame        (sub_frame_now),
-    .I_sample_cnt   (a_sample_cnt),
-    .I_aud_fsm      ({4'd0, mon_afsm_c2}),
+
+    .I_aud_valid    (audio_valid),
+
+    .I_paused       (pause_vid_sync[1]),
     .I_aud_undr     (mon_undr_c2),
-    .I_vid_fsm      ({4'd0, mon_vfsm_c2}),
-    .I_img_idx      (mon_img_c2[3:0]),
-    .I_mode_num     ({5'd0, mon_mode_c2}),
-    .I_item         (p5_it_c2),
+    .I_img_idx      (mon_img_c2),
+    .I_img_total    (mon_tot_c2),
+    .I_vol          (pan_vo_c2),
+    .I_auto_on      (mon_auto_c2),
     .O_de           (mon_de),
     .O_hs           (mon_hs),
     .O_vs           (mon_vs),
@@ -1759,13 +1862,27 @@ always @(posedge video_clk or posedge rst_pixel) begin
     end
 end
 
-wire [11:0] ir_mR = ( (ir_c4[0]?{4'd0,ir_R}:12'd0)+(ir_c4[1]?{3'd0,ir_R,1'b0}:12'd0)+(ir_c4[2]?{2'd0,ir_R,2'b0}:12'd0) )
-                  + (ir_c4[3]?{1'd0,ir_R,3'b0}:12'd0);
-wire [11:0] ir_mG = ( (ir_c4[0]?{4'd0,ir_G}:12'd0)+(ir_c4[1]?{3'd0,ir_G,1'b0}:12'd0)+(ir_c4[2]?{2'd0,ir_G,2'b0}:12'd0) )
-                  + (ir_c4[3]?{1'd0,ir_G,3'b0}:12'd0);
-wire [11:0] ir_mB = ( (ir_c4[0]?{4'd0,ir_B}:12'd0)+(ir_c4[1]?{3'd0,ir_B,1'b0}:12'd0)+(ir_c4[2]?{2'd0,ir_B,2'b0}:12'd0) )
-                  + (ir_c4[3]?{1'd0,ir_B,3'b0}:12'd0);
-
+wire [11:0] ir_mR;
+EG_LOGIC_MULT #(.INPUT_WIDTH_A(8),.INPUT_WIDTH_B(4),.OUTPUT_WIDTH(12),
+    .INPUTFORMAT("UNSIGNED"),.INPUTREGA("DISABLE"),.INPUTREGB("DISABLE"),
+    .OUTPUTREG("DISABLE"),.IMPLEMENT("DSP")) ir_gain_R(
+    .p(ir_mR),.a(ir_R),.b(ir_c4),
+    .cea(1'b1),.ceb(1'b1),.cepd(1'b1),.clk(video_clk),
+    .rstan(1'b1),.rstbn(1'b1),.rstpdn(1'b1));
+wire [11:0] ir_mG;
+EG_LOGIC_MULT #(.INPUT_WIDTH_A(8),.INPUT_WIDTH_B(4),.OUTPUT_WIDTH(12),
+    .INPUTFORMAT("UNSIGNED"),.INPUTREGA("DISABLE"),.INPUTREGB("DISABLE"),
+    .OUTPUTREG("DISABLE"),.IMPLEMENT("DSP")) ir_gain_G(
+    .p(ir_mG),.a(ir_G),.b(ir_c4),
+    .cea(1'b1),.ceb(1'b1),.cepd(1'b1),.clk(video_clk),
+    .rstan(1'b1),.rstbn(1'b1),.rstpdn(1'b1));
+wire [11:0] ir_mB;
+EG_LOGIC_MULT #(.INPUT_WIDTH_A(8),.INPUT_WIDTH_B(4),.OUTPUT_WIDTH(12),
+    .INPUTFORMAT("UNSIGNED"),.INPUTREGA("DISABLE"),.INPUTREGB("DISABLE"),
+    .OUTPUTREG("DISABLE"),.IMPLEMENT("DSP")) ir_gain_B(
+    .p(ir_mB),.a(ir_B),.b(ir_c4),
+    .cea(1'b1),.ceb(1'b1),.cepd(1'b1),.clk(video_clk),
+    .rstan(1'b1),.rstbn(1'b1),.rstpdn(1'b1));
 reg [23:0] ir_rgb_scaled;
 always @(posedge video_clk or posedge rst_pixel) begin
     if (rst_pixel) ir_rgb_scaled <= 24'd0;
@@ -1813,7 +1930,7 @@ frame_read_write #(
     .read_addr_1       (BUF1_ADDR),
     .read_addr_2       (BUF2_ADDR),
     .read_addr_3       (24'd0),
-    .read_addr_index   (disp_buf_idx),     // 槽号 0/1/2（两位，值域 0~2）
+    .read_addr_index   (ring_frame_slot),     // 槽号 0/1/2（两位，值域 0~2）
     .read_len          (FRAME_PIXELS),
     .read_en           (video_read_en),
     .read_data         (video_read_data),

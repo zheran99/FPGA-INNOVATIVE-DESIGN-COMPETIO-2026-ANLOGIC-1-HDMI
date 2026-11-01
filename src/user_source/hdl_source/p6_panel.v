@@ -44,7 +44,7 @@ module p6_panel #(
     input  wire [1:0]  I_logo_sel,     // #0 标志：0=关 1=开(静止) 2=动(弹移)
     input  wire        I_ad_on,        // #1 广告：0=关 1=开
     input wire [1:0] I_language, input wire I_layout, input wire [1:0] I_logo_size,
-    input  wire [1:0]  I_ad_bg,        // #2 背景：0=无 1=半透 2=实底
+    input  wire [2:0]  I_ad_bg,
 
     output wire [6:0]  O_font_idx,     // D2 地址（6 位汉字索引）
     output wire [4:0]  O_font_row,     // D2 地址（5 位行号）
@@ -179,6 +179,13 @@ module p6_panel #(
     localparam [6:0] CN_YU=7'd64, CN_YAN=7'd65, CN_WEN=7'd66, CN_YING=7'd67,
         CN_SHUANG=7'd68, CN_BU=7'd69, CN_JU=7'd70, CN_ZUO=7'd71, CN_SHANG=7'd72, CN_JU_CTR=7'd73, CN_ZHONG=7'd28;
 
+    localparam [6:0] CN_TIAO = 7'd57,   // 条（转场「竖条」已有）
+                     CN_KA   = 7'd76,   // 卡
+                     CN_PIAN = 7'd77,   // 片
+                     CN_HUA  = 7'd78,   // 划
+                     CN_XIAN = 7'd79,   // 线
+                     CN_QING = 7'd80;   // 青
+
     reg [6:0] nm0_c, nm1_c;
     always @(*) begin
         case (cid)
@@ -217,9 +224,13 @@ module p6_panel #(
 
             default: begin
                 case (I_ad_bg)
-                    2'd0:    begin v0_c = CN_WU;   v1_c = CN_BLANK; end // 无
-                    2'd1:    begin v0_c = CN_BAN;  v1_c = CN_TOU;   end // 半透
-                    default: begin v0_c = CN_SHIT; v1_c = CN_DI;    end // 实底
+                    3'd0:    begin v0_c = CN_WU;   v1_c = CN_BLANK; end // 无
+                    3'd1:    begin v0_c = CN_BAN;  v1_c = CN_TOU;   end // 半透
+                    3'd2:    begin v0_c = CN_SHIT; v1_c = CN_DI;    end // 实底
+                    3'd3:    begin v0_c = CN_ZUO;  v1_c = CN_TIAO;  end // 左条
+                    3'd4:    begin v0_c = CN_KA;   v1_c = CN_PIAN;  end // 卡片
+                    3'd5:    begin v0_c = CN_HUA;  v1_c = CN_XIAN;  end // 划线
+                    default: begin v0_c = CN_QING; v1_c = CN_DI;    end // 青底
                 endcase
             end
         endcase

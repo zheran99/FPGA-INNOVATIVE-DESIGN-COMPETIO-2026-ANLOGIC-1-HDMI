@@ -43,7 +43,7 @@ module uart_cmd #(
     output reg  [1:0]  O_p5_val,
     output reg         O_p6_wr,
     output reg  [2:0]  O_p6_sel,        // 0=LOGO 1=广告 2=背景 3=语言 4=布局
-    output reg  [1:0]  O_p6_val,
+    output reg  [2:0]  O_p6_val,
     output reg         O_p7_wr,         // SPEn / SPSn（ p7_reg）
     output reg  [1:0]  O_p7_sel,        // 0=SPE(频谱开关) 1=SPS(方向)
     output reg  [1:0]  O_p7_val,
@@ -68,7 +68,7 @@ module uart_cmd #(
                      P5_SIZE = 3'd3;
     localparam [1:0] P6_LOGO = 2'd0;
 
-    localparam [1:0] P7_WAVE = 2'd0, P7_HORZ = 2'd1;
+    localparam [1:0] P7_WAVE = 2'd0, P7_HORZ = 2'd1, P7_SHAPE = 2'd3;
 
     localparam [2:0] K_NONE = 3'd0, K_PONG = 3'd1, K_SET = 3'd2,
                      K_ACT  = 3'd3, K_VER  = 3'd4, K_ERR = 3'd5,
@@ -90,6 +90,7 @@ module uart_cmd #(
                       C_SSP  = 32'h53535000, C_SSZ  = 32'h53535A00,
                       C_SBG  = 32'h53424700, C_LOG  = 32'h4C4F4700,
                       C_SPE  = 32'h53504500, C_SPS  = 32'h53505300,
+                      C_SPM  = 32'h53504D00,
                       C_MON  = 32'h4D4F4E00,
                       C_ADL  = 32'h41444C00, C_ADP = 32'h41445000,
                       C_ADE  = 32'h41444500, C_ADB = 32'h41444200,
@@ -272,12 +273,15 @@ module uart_cmd #(
     reg        d_wr, d_rset, d_p5wr, d_p6wr, d_p7wr;
     reg        d_paus_set, d_paus_clr, d_next, d_prev, d_autoset, d_autoval;
     reg [2:0]  d_p5sel;
-    reg [1:0]  d_p5val, d_p6val, d_p7sel, d_p7val;
+    reg [1:0]  d_p5val, d_p7sel, d_p7val;
+    reg [2:0]  d_p6val;                 // 3 位：广告背景有 7 档（0..6）
     reg [2:0]  d_p6sel;
 
     wire [7:0] c_sub  = clamp8(pval, 8'd0, 8'd3);
     wire [7:0] c_sbg  = clamp8(pval, 8'd0, 8'd2);
     wire [7:0] c_logo = clamp8(pval, 8'd0, 8'd2);
+
+    wire [7:0] c_abg  = clamp8(pval, 8'd0, 8'd6);
     wire [7:0] c_te   = clamp8(pval, 8'd0, 8'd1);
 
     wire [7:0] c_bin  = clamp8(pval, 8'd0, 8'd1);
@@ -285,13 +289,14 @@ module uart_cmd #(
     wire [7:0] c_ssz  = clamp8(pval, 8'd0, 8'd1);
 
     wire [7:0] c_sps  = clamp8(pval, 8'd1, 8'd2);
+    wire [7:0] c_spm  = clamp8(pval, 8'd1, 8'd4);
 
     always @(*) begin
         d_err = E_NONE; d_kind = K_NONE; d_wsel = 4'd0; d_lval = 16'd0;
         d_wr = 1'b0; d_rset = 1'b0; d_p5wr = 1'b0; d_p6wr = 1'b0;
         d_p7wr = 1'b0;
         d_paus_set = 1'b0; d_paus_clr = 1'b0;
-        d_p5sel = 3'd0; d_p5val = 2'd0; d_p6sel = 2'd0; d_p6val = 2'd0;
+        d_p5sel = 3'd0; d_p5val = 2'd0; d_p6sel = 2'd0; d_p6val = 3'd0;
         d_p7sel = 2'd0; d_p7val = 2'd0;
         d_next = 1'b0; d_prev = 1'b0; d_autoset = 1'b0; d_autoval = 1'b0;
 
@@ -328,7 +333,7 @@ module uart_cmd #(
             C_ADE: begin d_wsel=S_LOCAL;d_p6wr=1'b1;d_p6sel=3'd1;
                          d_p6val=c_bin[1:0];d_lval={8'd0,c_bin};d_kind=K_SET;end
             C_ADB: begin d_wsel=S_LOCAL;d_p6wr=1'b1;d_p6sel=3'd2;
-                         d_p6val=c_logo[1:0];d_lval={8'd0,c_logo};d_kind=K_SET;end
+                         d_p6val=c_abg[2:0];d_lval={8'd0,c_abg};d_kind=K_SET;end
             C_VERS: d_kind = K_VER;
             C_RSET: begin d_rset = 1'b1; d_kind = K_ACT; end
             C_SYNC: begin d_err = E_IMPL; d_kind = K_ERR; end
@@ -380,6 +385,9 @@ module uart_cmd #(
             C_SPS: begin d_wsel = S_LOCAL; d_p7wr = 1'b1; d_p7sel = P7_HORZ;
                         d_p7val = {1'b0, (c_sps == 8'd2)};
                         d_lval = {8'd0, c_sps}; d_kind = K_SET; end
+            C_SPM: begin d_wsel = S_LOCAL; d_p7wr = 1'b1; d_p7sel = P7_SHAPE;
+                        d_p7val = c_spm[1:0]-2'd1;
+                        d_lval = {8'd0, c_spm}; d_kind = K_SET; end
             default: begin d_err = E_CMD; d_kind = K_ERR; end
             endcase
         end
@@ -745,7 +753,7 @@ module uart_cmd #(
             O_tx_data <= 8'd0; O_tx_start <= 1'b0; O_tx_cnt <= 8'd0;
             O_wr <= 1'b0; O_wr_sel <= 4'd0; O_wr_val <= 8'd0; O_rset <= 1'b0;
             O_p5_wr <= 1'b0; O_p5_sel <= 3'd0; O_p5_val <= 2'd0;
-            O_p6_wr <= 1'b0; O_p6_sel <= 2'd0; O_p6_val <= 2'd0;
+            O_p6_wr <= 1'b0; O_p6_sel <= 2'd0; O_p6_val <= 3'd0;
             O_p7_wr <= 1'b0; O_p7_sel <= 2'd0; O_p7_val <= 2'd0;
             O_pause_set <= 1'b0; O_pause_clr <= 1'b0;
             O_next_pulse <= 1'b0; O_prev_pulse <= 1'b0;

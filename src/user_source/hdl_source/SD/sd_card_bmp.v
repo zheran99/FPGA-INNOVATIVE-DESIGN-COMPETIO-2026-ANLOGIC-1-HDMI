@@ -35,6 +35,7 @@ module sd_card_bmp #(
     input                       write_finish_toggle,
     output reg [1:0]            write_buf_idx,
     output reg [1:0]            disp_buf_idx,
+    output wire [6:0] display_identity,
 
     output reg [1:0]            prev_disp_idx,
     output reg                  transition_tgl,
@@ -73,6 +74,7 @@ reg              first_image_committed;
 reg              auto_play_en;
 reg [31:0]       auto_cnt;
 reg [4:0]        img_found_count;
+assign display_identity={({1'b0,img_idx}+5'd1),disp_buf_idx};
 reg [3:0]        img_idx;              // 图号 0..15 4 位
 reg [3:0]        load_idx;             // 图号 0..15 4 位
 reg [1:0]        pending_buf_idx;      // 槽号 0..2（保持 2 位）
@@ -95,7 +97,7 @@ wire             load_wdog_fire;
 reg [2:0]        wrfin_tgl_sync;
 wire             write_finish_pulse;
 
-wire auto_tick;
+reg auto_tick;
 wire [3:0] next_from_current;
 
 integer i;
@@ -264,7 +266,7 @@ assign write_en   = wdata565_en && !recovering;
 assign write_data = wdata565;
 
 localparam [31:0] AUTO_TICK_MAX = (CLK_FREQ_HZ / 1000) * AUTO_INTERVAL_MS - 1;
-assign auto_tick  = (auto_cnt == AUTO_TICK_MAX);
+
 assign next_from_current = next_index_limited(img_idx, img_found_count);
 assign write_finish_pulse = wrfin_tgl_sync[2] ^ wrfin_tgl_sync[1];
 
@@ -353,6 +355,7 @@ always @(posedge clk or posedge rst) begin
         first_image_committed <= 1'b0;
         auto_play_en          <= 1'b0;
         auto_cnt              <= 32'd0;
+        auto_tick <= (AUTO_TICK_MAX == 32'd0);
         img_found_count       <= 5'd0;
         img_idx               <= 4'd0;
         load_idx              <= 4'd0;
@@ -392,6 +395,7 @@ always @(posedge clk or posedge rst) begin
             first_image_committed <= 1'b0;
             auto_play_en          <= 1'b0;
             auto_cnt              <= 32'd0;
+            auto_tick <= (AUTO_TICK_MAX == 32'd0);
             img_found_count       <= 5'd0;
             img_idx               <= 4'd0;
             load_idx              <= 4'd0;
@@ -483,6 +487,7 @@ always @(posedge clk or posedge rst) begin
                 first_image_committed <= 1'b0;
                 auto_play_en          <= 1'b0;
                 auto_cnt              <= 32'd0;
+                auto_tick <= (AUTO_TICK_MAX == 32'd0);
                 img_found_count       <= 5'd0;
                 img_idx               <= 4'd0;
                 load_idx              <= 4'd0;
@@ -506,6 +511,7 @@ always @(posedge clk or posedge rst) begin
                 if (key_auto_press && scan_done && (img_found_count > 3'd1)) begin
                     auto_play_en <= ~auto_play_en;
                     auto_cnt     <= 32'd0;
+                    auto_tick <= (AUTO_TICK_MAX == 32'd0);
                 end
 
                 auto_play_en_o <= auto_play_en;
@@ -513,12 +519,16 @@ always @(posedge clk or posedge rst) begin
 
                 if (scan_done && auto_play_en && display_valid && !load_busy
                     && first_image_committed && (img_found_count > 3'd1)) begin
-                    if (auto_tick)
+                    if (auto_tick) begin
                         auto_cnt <= 32'd0;
-                    else
+                        auto_tick <= (AUTO_TICK_MAX == 32'd0);
+                    end else begin
                         auto_cnt <= auto_cnt + 32'd1;
+                        auto_tick <= (auto_cnt == AUTO_TICK_MAX - 32'd1);
+                    end
                 end else begin
                     auto_cnt <= 32'd0;
+                    auto_tick <= (AUTO_TICK_MAX == 32'd0);
                 end
 
                 if (!schedule_hold) begin
@@ -535,9 +545,12 @@ always @(posedge clk or posedge rst) begin
                     prev_req_pending  <= 1'b0;
                     pending_is_switch <= 1'b1;   // 首图 = 切换（要置 display_valid）
                     auto_cnt          <= 32'd0;
+                    auto_tick <= (AUTO_TICK_MAX == 32'd0);
                 end
 
-                else if (display_valid && !load_busy && !recovering && prev_req_pending && prev_valid
+                else if (display_valid && !recovering && prev_req_pending && prev_valid
+                         && (!load_busy || (!pending_is_switch && prev_found != pending_buf_idx
+                                               && disp_buf_idx != pending_buf_idx))
                          && (img_found_count > 3'd1)) begin
                     prev_req_pending <= 1'b0;
                     next_req_pending <= 1'b0;
@@ -545,12 +558,15 @@ always @(posedge clk or posedge rst) begin
                     img_idx          <= prev_pic_r;
                     last_dir         <= 1'b1;    // 记住：用户往回看
                     auto_cnt         <= 32'd0;   // 手动操作 复位轮播计时
+                    auto_tick <= (AUTO_TICK_MAX == 32'd0);
                     prev_disp_idx    <= disp_buf_idx;
                     transition_tgl   <= ~transition_tgl;
                     schedule_hold <= 1'b1;
                 end
 
-                else if (display_valid && !load_busy && !recovering && next_req_pending && next_valid
+                else if (display_valid && !recovering && next_req_pending && next_valid
+                         && (!load_busy || (!pending_is_switch && next_found != pending_buf_idx
+                                               && disp_buf_idx != pending_buf_idx))
                          && (img_found_count > 3'd0)) begin
                     next_req_pending <= 1'b0;
                     prev_req_pending <= 1'b0;
@@ -558,6 +574,7 @@ always @(posedge clk or posedge rst) begin
                     img_idx          <= next_pic_r;
                     last_dir         <= 1'b0;    // 记住：用户往前看
                     auto_cnt         <= 32'd0;
+                    auto_tick <= (AUTO_TICK_MAX == 32'd0);
                     prev_disp_idx    <= disp_buf_idx;
                     transition_tgl   <= ~transition_tgl;
                     schedule_hold <= 1'b1;
@@ -576,6 +593,7 @@ always @(posedge clk or posedge rst) begin
                     pending_is_switch <= 1'b1;
                     last_dir          <= 1'b1;        // 记住方向
                     auto_cnt          <= 32'd0;
+                    auto_tick <= (AUTO_TICK_MAX == 32'd0);
                 end
 
                 else if (scan_done && bmp_ready && display_valid && !load_busy
@@ -591,11 +609,13 @@ always @(posedge clk or posedge rst) begin
                     pending_is_switch <= 1'b1;
                     last_dir          <= 1'b0;        // 记住方向
                     auto_cnt          <= 32'd0;
+                    auto_tick <= (AUTO_TICK_MAX == 32'd0);
                 end
 
                 else if (scan_done && bmp_ready && display_valid && !load_busy
                          && auto_play_en && auto_tick && (img_found_count > 3'd1)) begin
                     auto_cnt <= 32'd0;               // 到点即复位计时
+                    auto_tick <= (AUTO_TICK_MAX == 32'd0);
                     last_dir <= 1'b0;                // 轮播=前进方向
                     if (next_valid) begin
                         disp_buf_idx     <= next_found;

@@ -21,6 +21,7 @@ module audio_stream_gen #(
 
     // 状态
     output reg          O_underrun,          // 1=本次取到的是"静音填充"（FIFO 空）
+    output reg          O_sample_advance,
     output reg  [31:0]  O_sample_cnt         // 已输出样本计数（32 位 ≈ 24.8h）
 );
 
@@ -60,10 +61,12 @@ always @(posedge I_clk or posedge I_rst) begin
         O_audio_right_data <= 24'd0;
         O_underrun         <= 1'b0;
         O_sample_cnt       <= 32'd0;
+        O_sample_advance   <= 1'b0;
         rd_req_d           <= 1'b0;
         uc_pend            <= 1'b0;
         data_started       <= 1'b0;
     end else begin
+        O_sample_advance <= 1'b0;
         O_audio_valid <= 1'b0;
         O_fifo_rd_en  <= 1'b0;
 
@@ -81,6 +84,7 @@ always @(posedge I_clk or posedge I_rst) begin
             O_audio_valid <= 1'b1;
             O_underrun    <= 1'b0;
             O_sample_cnt  <= O_sample_cnt + 32'd1;
+            O_sample_advance <= 1'b1;
             uc_pend       <= 1'b0;              // 正常路径优先，清欠载挂起
         end else if (en48 && (I_mute || !data_started)) begin
 

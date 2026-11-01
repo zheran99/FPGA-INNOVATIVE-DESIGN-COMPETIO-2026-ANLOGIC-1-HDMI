@@ -18,7 +18,7 @@ module p6_reg (
     output reg [1:0] O_logo_size, // 0=64, 1=128, 2=256
     output reg  [1:0]  O_logo_sel,      // #0 标志：0=关 1=开(静止) 2=动(弹移)
     output reg         O_ad_on,         // #1 广告：0=关 1=开（左上角显示文字）
-    output reg  [1:0]  O_ad_bg,         // #2 背景：0=无 1=半透 2=实底
+    output reg  [2:0]  O_ad_bg,
     output reg  [1:0]  O_ad_language,   // 0=中文 1=英文 2=双语
     output reg         O_ad_layout,     // 0=左上 1=上方居中
 
@@ -29,7 +29,7 @@ module p6_reg (
 
     input  wire        I_u_wr,          // 1 拍写脉冲
     input  wire [2:0]  I_u_sel,         // 0=LOGO 1=开关 2=背景 3=语言 4=布局
-    input  wire [1:0]  I_u_val,         // LOGO：0=关 1=开(静止) 2=动(弹移)
+    input  wire [2:0]  I_u_val,         // LOGO 用低 2 位；背景用全部 3 位（0..6）
     input  wire        I_u_rst          // 恢复默认值
 );
 
@@ -43,9 +43,14 @@ module p6_reg (
                      ITEM_SIZE = 3'd5,
                      ITEM_LAST = 3'd5;
 
-    localparam [1:0] AD_BG_NONE  = 2'd0,
-                     AD_BG_HALF  = 2'd1,
-                     AD_BG_SOLID = 2'd2;
+    localparam [2:0] AD_BG_NONE   = 3'd0,
+                     AD_BG_HALF   = 3'd1,
+                     AD_BG_SOLID  = 3'd2,
+                     AD_BG_ACCENT = 3'd3,
+                     AD_BG_CARD   = 3'd4,
+                     AD_BG_ULINE  = 3'd5,
+                     AD_BG_TEAL   = 3'd6,
+                     AD_BG_LAST   = 3'd6;
 
     // Logo
 
@@ -87,10 +92,14 @@ module p6_reg (
             O_changed <= 1'b0;                 // 默认清掉
 
             if (hop && !hop_back) begin
-                O_item    <= (O_item >= ITEM_LAST) ? ITEM_LOGO : O_item + 3'd1;
+                case(O_item)
+                    0:O_item<=5;5:O_item<=1;1:O_item<=2;2:O_item<=3;3:O_item<=4;default:O_item<=0;
+                endcase
                 O_changed <= 1'b1;
             end else if (hop_back && !hop) begin
-                O_item    <= (O_item == ITEM_LOGO) ? ITEM_LAST : O_item - 3'd1;
+                case(O_item)
+                    0:O_item<=4;4:O_item<=3;3:O_item<=2;2:O_item<=1;1:O_item<=5;default:O_item<=0;
+                endcase
                 O_changed <= 1'b1;
             end
 
@@ -101,10 +110,9 @@ module p6_reg (
                                              ? LOGO_SEL_OFF
                                              : O_logo_sel + 2'd1;
                     ITEM_AD:   O_ad_on    <= ~O_ad_on;
-
-                    ITEM_BG:   O_ad_bg    <= (O_ad_bg >= AD_BG_SOLID)
+                    ITEM_BG:   O_ad_bg    <= (O_ad_bg >= AD_BG_LAST)
                                              ? AD_BG_NONE
-                                             : O_ad_bg + 2'd1;
+                                             : O_ad_bg + 3'd1;
                     ITEM_LANGUAGE: O_ad_language <= O_ad_language>=2 ? 2'd0 : O_ad_language+2'd1;
                     ITEM_LAYOUT: O_ad_layout <= ~O_ad_layout;
                     ITEM_SIZE: O_logo_size <= O_logo_size>=2 ? 2'd0 : O_logo_size+2'd1;
@@ -142,7 +150,7 @@ module p6_reg (
                 O_changed <= 1'b1;
             end
             else if (I_u_wr && I_u_sel == 2'd2) begin
-                O_ad_bg <= (I_u_val > 2'd2) ? 2'd2 : I_u_val;
+                O_ad_bg <= (I_u_val[2:0] > AD_BG_LAST) ? AD_BG_LAST : I_u_val[2:0];
                 O_changed <= 1'b1;
             end
             else if (I_u_wr && (I_u_sel == P6_SEL_LOGO)) begin

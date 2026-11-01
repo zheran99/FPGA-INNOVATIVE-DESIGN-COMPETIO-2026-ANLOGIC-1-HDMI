@@ -133,9 +133,9 @@ module param_effect (
         end
     end
 
-    wire signed [9:0] d5_r = $signed({1'b0, p4_rgb[23:16]}) - $signed({1'b0, gray_r});
-    wire signed [9:0] d5_g = $signed({1'b0, p4_rgb[15:8]})  - $signed({1'b0, gray_r});
-    wire signed [9:0] d5_b = $signed({1'b0, p4_rgb[7:0]})   - $signed({1'b0, gray_r});
+    (* use_ripple = 1 *) wire signed [9:0] d5_r = $signed({1'b0, p4_rgb[23:16]}) - $signed({1'b0, gray_r});
+    (* use_ripple = 1 *) wire signed [9:0] d5_g = $signed({1'b0, p4_rgb[15:8]})  - $signed({1'b0, gray_r});
+    (* use_ripple = 1 *) wire signed [9:0] d5_b = $signed({1'b0, p4_rgb[7:0]})   - $signed({1'b0, gray_r});
 
     wire signed [18:0] m5_r = d5_r * $signed({1'b0, sat_g_r});
     wire signed [18:0] m5_g = d5_g * $signed({1'b0, sat_g_r});

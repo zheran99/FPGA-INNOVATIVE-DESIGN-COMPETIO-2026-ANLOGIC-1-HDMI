@@ -1499,9 +1499,8 @@ TEXT_RATE = 48000
 TEXT_SAMPLES_PER_FRAME = 792
 TEXT_ASCII_FIRST, TEXT_ASCII_LAST = 0x20, 0x7E
 TEXT_AD_SLOTS = 8
-TEXT_AD_LINES = 4
+TEXT_AD_LINES = 8
 TEXT_AD_COLS = 48
-TEXT_AD_COLS_CN = 26
 
 # 广告字库收录的字符，顺序必须与 ad_cn_font_lo/hi.mif 一致（索引即字形槽位）
 TEXT_AD_CHARSET = (
@@ -1510,6 +1509,7 @@ TEXT_AD_CHARSET = (
     "3旧金门桥橙色暮空下映出雄伟剪影阳洒沙滩成排茅草伞与躺椅上透着悠闲假期气息"
     "晴朗蓝天孤零木屋立黄麦田9茂密冷杉笼罩浓重白里深邃而神秘壮硕狗戴属链项圈"
     "警觉地守围栏后院黑暗披床单幽缓走发楼梯这间多彩复古厅因梵高名画点缀洋溢艺术温馨"
+    "Abackperusytnqil,gzhmofSdwvTGBjDI-V"
 )
 
 
@@ -1589,8 +1589,7 @@ def wrap_ad(text):
         seg = " ".join(seg.split())
         if not seg:
             continue
-        wide = any(ord(c) > 0x7F for c in seg)
-        lines.extend(textwrap.wrap(seg, width=TEXT_AD_COLS_CN if wide else TEXT_AD_COLS,
+        lines.extend(textwrap.wrap(seg, width=TEXT_AD_COLS,
                                    break_long_words=True,
                                    break_on_hyphens=False))
     return lines or [""]
@@ -1617,9 +1616,13 @@ def ad_tables(ad_path):
     entries, stream = [], []
     for idx, text in enumerate(texts):
         lines = wrap_ad(text)
-        if len(lines) > TEXT_AD_LINES:
+        if len(lines) > TEXT_AD_SLOTS:
             raise ValueError(f"第 {idx + 1} 条折行后 {len(lines)} 行，"
-                             f"最多 {TEXT_AD_LINES} 行")
+                             f"最多 {TEXT_AD_SLOTS} 行")
+        for line in lines:
+            if len(line) > 0x3F:
+                raise ValueError(f"第 {idx + 1} 条中有一行 {len(line)} 字符，"
+                                 f"最多 63 个")
         for slot in range(TEXT_AD_SLOTS):
             if slot < len(lines):
                 entries.append((len(stream), len(lines[slot])))

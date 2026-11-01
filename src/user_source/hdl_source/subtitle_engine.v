@@ -19,6 +19,7 @@ module subtitle_engine #(
 
     // 时间基
 
+    parameter integer USE_SAMPLE_PULSE = 0,
     parameter integer LOOP_SAMPLE_COUNT = 0,
     parameter SAMPLES_PER_FRAME = 792,   // 黄金常数（48kHz / 60.606fps）
 
@@ -40,6 +41,7 @@ module subtitle_engine #(
     input  wire        I_vs,
     input  wire [23:0] I_rgb,
 
+    input  wire        I_sample_advance,
     input  wire [31:0] I_sample_cnt,
 
     input  wire        I_sub_on,       // 字幕总开关
@@ -77,7 +79,7 @@ module subtitle_engine #(
     localparam [9:0] SPF = SAMPLES_PER_FRAME[9:0];   // 792
 
     reg [31:0] samp_d;
-    wire       frame_inc = (I_sample_cnt != samp_d);
+    wire       frame_inc = USE_SAMPLE_PULSE ? I_sample_advance : (I_sample_cnt != samp_d);
 
     reg [9:0]  acc;        // 帧内样本偏移 0..791
     reg [23:0] frame_q;    // 帧号（寄存）
@@ -96,8 +98,10 @@ module subtitle_engine #(
 
     localparam [23:0] CUE_SENTINEL = 24'h00FFFF;
 
-    localparam [1:0] S_IDLE = 2'd0, S_WAIT = 2'd1, S_CMP = 2'd2;
+    localparam [1:0] S_IDLE = 2'd0, S_WAIT = 2'd1, S_CMP = 2'd2,
+                     S_APPLY = 2'd3;
     reg [1:0]  st;
+    reg cue_is_sentinel, cue_is_future;
 
     reg [23:0] cur_frame;      // 当前句起始帧
     reg [15:0] cur_coff;
@@ -113,6 +117,8 @@ module subtitle_engine #(
             acc       <= 10'd0;
             frame_q   <= 24'd0;
             st        <= S_IDLE;
+            cue_is_sentinel <= 1'b0;
+            cue_is_future <= 1'b0;
             O_cue_idx <= 10'd0;
             cur_frame <= 24'd0;
             cur_coff  <= 16'd0;
@@ -156,14 +162,19 @@ module subtitle_engine #(
                 S_WAIT: st <= S_CMP;               // 等地址/数据各打 1 拍
 
                 S_CMP: begin
-                    if (I_cue_frame == CUE_SENTINEL) begin
+                    cue_is_sentinel <= I_cue_frame == CUE_SENTINEL;
+                    cue_is_future <= frame_now < I_cue_frame;
+                    st <= S_APPLY;
+                end
+                S_APPLY: begin
+                    if (cue_is_sentinel) begin
 
                         cue_valid <= (O_cue_idx != 10'd0) &&
                                      (frame_now >= cur_frame);
                         nxt2_coff <= 16'd0;        // 没有下一句 第 2 行不画
                         nxt2_len  <= 16'd0;
                         st        <= S_IDLE;
-                    end else if (frame_now < I_cue_frame) begin
+                    end else if (cue_is_future) begin
 
                         cue_valid <= (O_cue_idx != 10'd0);
                         nxt2_coff <= I_cue_coff;

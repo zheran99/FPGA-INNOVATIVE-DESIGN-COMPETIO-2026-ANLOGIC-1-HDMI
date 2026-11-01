@@ -1243,7 +1243,7 @@ module p5_cn_font_rom (
     output wire [31:0] rom_row       // 同步输出：地址后 1 拍有效
 );
 
-    localparam integer CN_N = 76;
+    localparam integer CN_N = 95;
 
     EG_LOGIC_BRAM #(
         .DATA_WIDTH_A  (32),

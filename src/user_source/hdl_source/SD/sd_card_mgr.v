@@ -8,6 +8,11 @@ module sd_card_mgr #(
     input V_sec_read, input [31:0] V_sec_read_addr, input V_cancel,
     output [7:0] V_sec_read_data,
     output V_sec_read_data_valid,V_sec_read_end,V_sec_error,V_idle,
+
+    input  V_owner_spec,
+    output V_result_spec,
+
+    output V_sec_error_raw,
     input A_sec_read, input [31:0] A_sec_read_addr, input A_owner_text,
     input A_cancel, output [7:0] A_sec_read_data,
     output A_sec_read_data_valid,A_sec_read_end,A_sec_error,
@@ -22,7 +27,7 @@ wire [7:0] raw_data,raw_transmit,data;
 wire raw_cs,raw_request,sector_ready,sector_busy,done,error,valid;
 wire [1:0] result_owner;
 wire request=read_mode && sector_ready && (A_sec_read || (V_sec_read && !V_cancel));
-wire [1:0] selected_owner=A_sec_read ? {A_owner_text,1'b1} : 2'b00;
+wire [1:0] selected_owner=A_sec_read ? {A_owner_text,1'b1} : {V_owner_spec,1'b0};
 wire cancel=result_owner[0] ? A_cancel : V_cancel;
 sd_verified_sector #(.TIMEOUT_CYCLES(TIMEOUT_CYCLES),.MAX_RETRIES(2),.REPLAY_GAP(40),.SERIAL_CRC(1)) sector(
     .clk(clk),.rst(rst),.request(request),.cancel(cancel),
@@ -46,12 +51,18 @@ spi_master spi(
     .data_in(raw_transmit),.data_out(spi_data_out));
 assign V_sec_read_data=data;
 assign A_sec_read_data=data;
+
+wire v_is_spec = result_owner==2'b10;
+assign V_result_spec = v_is_spec;
+
 assign V_sec_read_data_valid=valid && !result_owner[0];
 assign V_sec_read_end=done && !result_owner[0];
-assign V_sec_error=error && !result_owner[0];
+assign V_sec_error=error && result_owner==2'b00;
+
+assign V_sec_error_raw=error && !result_owner[0];
 assign V_idle=!(sector_busy && !result_owner[0]);
 assign A_sec_read_data_valid=valid && result_owner[0];
 assign A_sec_read_end=done && result_owner[0];
 assign A_sec_error=error && result_owner[0];
-assign A_result_text=result_owner[1];
+assign A_result_text=&result_owner;
 endmodule

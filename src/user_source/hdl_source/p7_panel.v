@@ -18,7 +18,7 @@ module p7_panel #(
     input wire I_clk,I_rst,I_de,I_hs,I_vs,
     input wire [23:0] I_rgb,
     input wire I_panel_en,I_on,I_horizontal,I_visual_on,
-    input wire [1:0] I_item,
+    input wire [1:0] I_item,I_shape,
     output wire [6:0] O_font_idx,
     output wire [4:0] O_font_row,
     input wire [31:0] I_font_word,
@@ -34,28 +34,51 @@ module p7_panel #(
     wire [11:0] px_next=x-12'd182;
     wire third_next=px_next>=12'd616;
     wire second_next=px_next>=12'd308 && !third_next;
-    reg third,second;
+    reg third,second,fourth;
     reg [8:0] ix;
     always @(posedge I_clk or posedge I_rst) begin
-        if(I_rst) begin third<=0;second<=0;ix<=0;end
+        if(I_rst) begin third<=0;second<=0;fourth<=0;ix<=0;end
         else begin
-            third<=third_next;second<=second_next;
+            third<=third_next;second<=second_next;fourth<=y>=12'd574 && y<12'd606;
             ix<=third_next ? x[8:0]-9'd286 :
                 second_next ? x[8:0]-9'd490 : x[8:0]-9'd182;
         end
     end
-    wire [1:0] card=third ? 2'd2 : second ? 2'd1 : 2'd0;
+    wire [1:0] card=fourth ? 2'd3 : third ? 2'd2 : second ? 2'd1 : 2'd0;
 
     wire [4:0] cy=py[4:0];
-    wire hit=py<32 && (px<300 || (px>=308 && px<608) || (px>=616 && px<916));
+    wire hit=py<32 && (fourth ? (px>=308 && px<608) : (px<300 || (px>=308 && px<608) || (px>=616 && px<916)));
     wire border=ix<9'd2 || ix>=9'd298 || cy<5'd2 || cy>=5'd30;
     wire [5:0] name_off=ix[5:0]-6'd16,value_off=ix[5:0]-6'd52;
-    wire in_name=ix>=9'd16 && ix<(third ? 9'd112 : 9'd80);
-    wire in_value=ix>=9'd180 && ix<9'd244;
-    wire [4:0] gx=in_value ? value_off[4:0] : name_off[4:0];
-    wire [6:0] name_idx=third ? (ix>=80 ? 7'd48 : name_off[5] ? 7'd11 : 7'd75) : second ? (name_off[5] ? 6'd63 : 6'd62) :
-                                             (name_off[5] ? 6'd61 : 6'd60);
-    wire [6:0] value_idx=second ?
+    wire in_name=ix>=9'd16 && ix<((third && !fourth) ? 9'd112 : 9'd80);
+    wire in_value=fourth ? (ix>=9'd128 && ix<9'd256) : (ix>=9'd180 && ix<9'd244);
+    wire [4:0] gx=(fourth && ix[7]) ? ix[4:0] : in_value ? value_off[4:0] : name_off[4:0];
+    wire [6:0] name_idx=fourth ? (name_off[5] ? 7'd79 : 7'd78) : third ? (ix>=80 ? 7'd48 : name_off[5] ? 7'd11 : 7'd75) : second ? (name_off[5] ? 6'd63 : 6'd62) :
+                                             (name_off[5] ? 7'd77 : 7'd76);
+    reg [6:0] shape_idx;
+    always @* begin
+        shape_idx=7'd38;
+        case({I_shape,ix[6:5]})
+        4'd0:shape_idx=7'd68; // 双
+        4'd1:shape_idx=7'd80; // 锥
+        4'd2:shape_idx=7'd81; // 连
+        4'd3:shape_idx=7'd82; // 环
+        4'd4:shape_idx=7'd83; // 放
+        4'd5:shape_idx=7'd84; // 射
+        4'd6:shape_idx=7'd61; // 谱
+        4'd7:shape_idx=7'd85; // 柱
+        4'd8:shape_idx=7'd68; // 双
+        4'd9:shape_idx=7'd63; // 向
+        4'd10:shape_idx=7'd86; // 脉
+        4'd11:shape_idx=7'd87; // 冲
+        4'd12:shape_idx=7'd34; // 分
+        4'd13:shape_idx=7'd88; // 段
+        4'd14:shape_idx=7'd89; // 灯
+        4'd15:shape_idx=7'd82; // 环
+        default:;
+        endcase
+    end
+    wire [6:0] value_idx=fourth ? shape_idx : second ?
         (I_horizontal ? (value_off[5] ? 6'd50 : 6'd49) :
                         (value_off[5] ? 6'd14 : 6'd56)) :
         (value_off[5] ? 6'd38 : ((third ? I_visual_on : I_on) ? 6'd0 : 6'd1));
@@ -63,7 +86,7 @@ module p7_panel #(
     assign O_font_idx=ix[7] ? value_idx : name_idx;
     assign O_font_row=py[4:0];
 
-    wire switch_en = !second;
+    wire switch_en = !second && !fourth;
     wire switch_on = third ? I_visual_on : I_on;
     wire focus_mark = (card==I_item) && ix>=9'd6 && ix<9'd9 && cy>=5'd11 && cy<5'd21;
     wire switch_track = switch_en && ix>=9'd248 && ix<9'd284 && cy>=5'd9 && cy<5'd23;
@@ -78,7 +101,7 @@ module p7_panel #(
         (cy==5'd9 && ix>=9'd269 && ix<=9'd270) || (cy==5'd10 && ix>=9'd268 && ix<=9'd271) ||
         (cy==5'd11 && ix>=9'd267 && ix<=9'd272) || (cy==5'd12 && ix>=9'd266 && ix<=9'd273) ||
         (cy==5'd13 && ix>=9'd265 && ix<=9'd274) || (cy==5'd14 && ix>=9'd264 && ix<=9'd275);
-    wire arrow_hit = second && (I_horizontal ? arrow_right : arrow_up);
+    wire arrow_hit = second && !fourth && (I_horizontal ? arrow_right : arrow_up);
     wire [2:0] decoration = (focus_mark || arrow_hit) ? 3'd1 :
         switch_knob ? (switch_on ? 3'd4 : 3'd5) :
         switch_track ? (switch_on ? 3'd2 : 3'd3) : 3'd0;
@@ -107,7 +130,7 @@ module p7_panel #(
             hit2<=0;hit3<=0;border2<=0;border3<=0;
             selected2<=0;selected3<=0;text2<=0;pixel3<=0;gx2<=0;
         end else begin
-            px<=x-12'd182;py<=y-12'd614;
+            px<=x-12'd182;py<=(y>=12'd574 && y<12'd606) ? y-12'd574 : y-12'd614;
             rgb1<=I_rgb;rgb2<=rgb1;rgb3<=rgb2;
             de_pipe<={de_pipe[2:0],I_de};hs_pipe<={hs_pipe[2:0],I_hs};
             vs_pipe<={vs_pipe[2:0],I_vs};

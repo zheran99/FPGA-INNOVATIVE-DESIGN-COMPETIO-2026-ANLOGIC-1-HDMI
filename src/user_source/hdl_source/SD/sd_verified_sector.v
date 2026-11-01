@@ -54,8 +54,12 @@ module sd_verified_sector #(
         end
     endfunction
 
+    always @(posedge clk or posedge rst)begin
+        if(rst)result_owner<=2'b00;
+        else if(accept)result_owner<=owner;
+    end
     always @(posedge clk) begin
-        if(accept)begin raw_address<=address;result_owner<=owner;end
+        if(accept)raw_address<=address;
         if(receive_byte && !count[9])buffer[count[8:0]]<=raw_data;
         read_data<=buffer[count[8:0]];
         if(state==IDLE || state==DRAIN)crc<=0;

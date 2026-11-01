@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 
 module osd_param_panel #(
+    parameter SHARED_FONT=0,
 
     // 画布/视频
 
@@ -60,7 +61,9 @@ module osd_param_panel #(
     output wire        O_de,
     output wire        O_hs,
     output wire        O_vs,
-    output wire [23:0] O_rgb
+    output wire [23:0] O_rgb,
+    output wire [12:0] O_shared_font_addr,
+    input wire I_shared_font_pixel
 );
 
     localparam DX_W  = 10;
@@ -150,6 +153,7 @@ module osd_param_panel #(
     reg [7:0]  hw_inner_d1, hw_fill_d1, hw_gap_d1;
     reg        row_ok_d1, row_rect_d1, row_rect_i_d1;
     reg        left_side_d1, upper_side_d1;
+    reg [DX_W-1:0] rect_outer_d1,rect_inner_lo_d1,rect_inner_hi_d1;
     reg [7:0]  len_r;
     always @(posedge I_clk or posedge I_rst) begin
         if (I_rst) begin
@@ -161,6 +165,7 @@ module osd_param_panel #(
             row_rect_i_d1 <= 1'b0;
             left_side_d1 <= 1'b0;         upper_side_d1 <= 1'b0;
             len_r <= 8'd0;
+            rect_outer_d1<=0;rect_inner_lo_d1<=0;rect_inner_hi_d1<=0;
         end else begin
             x_d1 <= x_now;                y_d1 <= y_now;
             dx_d1 <= dx_now;
@@ -172,6 +177,10 @@ module osd_param_panel #(
             left_side_d1 <= left_side_now;
             upper_side_d1 <= upper_side_now;
             len_r <= len_c;
+
+            rect_outer_d1 <= {2'b0,hw_gap_now} + BAR_W;
+            rect_inner_lo_d1 <= {2'b0,hw_gap_now} + T_BORDER;
+            rect_inner_hi_d1 <= {2'b0,hw_gap_now} + BAR_W - T_BORDER;
         end
     end
 
@@ -180,11 +189,11 @@ module osd_param_panel #(
     wire in_ring  = in_fill && !in_inner;
 
     wire in_rect   = row_ok_d1 && row_rect_d1 &&
-                     (dx_d1 >= hw_gap_d1) && (dx_d1 < (hw_gap_d1 + BAR_W));
+                     (dx_d1 >= hw_gap_d1) && (dx_d1 < rect_outer_d1);
 
     wire in_rect_i = row_ok_d1 && row_rect_i_d1 &&
-                     (dx_d1 >= (hw_gap_d1 + T_BORDER)) &&
-                     (dx_d1 <  (hw_gap_d1 + BAR_W - T_BORDER));
+                     (dx_d1 >= rect_inner_lo_d1) &&
+                     (dx_d1 <  rect_inner_hi_d1);
 
     wire rect_border = in_rect & ~in_rect_i;
 
@@ -233,34 +242,6 @@ reg [4:0] font_code_d2;
     reg [3:0]  font_row_d2;
     reg        bit_in_txt_d2, in_val_row_d2;
     reg [3:0]  font_bitcol_d2;
-    always @(posedge I_clk or posedge I_rst) begin
-        if (I_rst) begin
-            de_d2 <= 1'b0; hs_d2 <= 1'b0; vs_d2 <= 1'b0;
-            in_fill_d2 <= 1'b0; in_ring_d2 <= 1'b0;
-            rect_bg_d2 <= 1'b0; rect_border_d2 <= 1'b0; rect_fill_d2 <= 1'b0;
-            rect_sel_d2 <= 1'b0; panel_d2 <= 1'b0;
-            rgb_d2 <= 24'd0;
-            font_code_d2 <= 0; font_row_d2 <= 4'd0;
-            bit_in_txt_d2 <= 1'b0; in_val_row_d2 <= 1'b0;
-            font_bitcol_d2 <= 4'd0;
-        end else begin
-            de_d2 <= de_d1; hs_d2 <= hs_d1; vs_d2 <= vs_d1;
-            in_fill_d2 <= in_fill; in_ring_d2 <= in_ring;
-            rect_bg_d2 <= in_rect;
-            rect_border_d2 <= rect_border; rect_fill_d2 <= rect_fill;
-            rect_sel_d2 <= bar_sel;
-            panel_d2 <= I_panel_en;
-            rgb_d2 <= rgb_d1;
-
-            font_code_d2 <= compact_glyph(in_name_row_c ? name_code_c : val_code_c);
-            font_row_d2   <= in_name_row_c ? txt_row_c   : txt_row_val_c;
-
-            bit_in_txt_d2 <= (in_name_row_c & bit_in_name_col_c) |
-                             (in_val_row_c  & bit_in_val_col_c);   // 两者互斥
-            in_val_row_d2 <= in_val_row_c;                   // 决定文字颜色
-            font_bitcol_d2<= in_name_row_c ? name_bitcol_c : val_bitcol_c;
-        end
-    end
 
     wire [11:0] nm_off = (x_d1 >= NX[11:0]) ? (x_d1 - NX[11:0]) : 12'd0;
     wire in_name_col_c = (x_d1 >= NX[11:0]) && (x_d1 < (NX + NM_SPAN));
@@ -269,23 +250,31 @@ reg [4:0] font_code_d2;
                                                 : (nm_off - 12'd36);
     wire        in_name_row_c = (y_d1 >= TY_NAME[11:0]) &&
                                 (y_d1 < (TY_NAME + CH_H));
-    wire        bit_in_name_col_c = in_name_row_c && in_name_col_c &&
-                                    (name_coff_c < CH_W);
-    wire [3:0]  name_bitcol_c = name_coff_c[3:0];       // 0..15
+    localparam DIRECT_NAME_WINDOW=(CH_W==16 && CH_PITCH==20 && NM_SPAN==36);
+    wire name_window0=(x_d1>=NX) && (x_d1<NX+16);
+    wire name_window1=(x_d1>=NX+20) && (x_d1<NX+36);
+    wire bit_in_name_col_c = in_name_row_c && (DIRECT_NAME_WINDOW ?
+        (name_window0 || name_window1) : (in_name_col_c && name_coff_c<CH_W));
+    wire [3:0] name_col0_bits=x_d1[3:0]-NX;
+    wire [3:0] name_col1_bits=x_d1[3:0]-(NX+20);
+    wire [3:0] name_bitcol_c = DIRECT_NAME_WINDOW ?
+        (x_d1<NX+20 ? name_col0_bits : name_col1_bits) : name_coff_c[3:0];       // 0..15
 
     wire [11:0] name_yoff_c   = y_d1 - TY_NAME[11:0];
     wire [3:0]  txt_row_c     = name_yoff_c[3:0];
 
-    wire [11:0] vl_off = (x_d1 >= VX[11:0]) ? (x_d1 - VX[11:0]) : 12'd0;
-    wire in_val_col_c = (x_d1 >= VX[11:0]) && (x_d1 < (VX + VL_SPAN));
-    wire [11:0] val_coff_c = (vl_off < 12'd20) ? vl_off
-                           : (vl_off < 12'd40) ? (vl_off - 12'd20)
-                                               : (vl_off - 12'd40);
+    wire val_col0_c = (x_d1 >= VX) && (x_d1 < VX + CH_W);
+    wire val_col1_c = (x_d1 >= VX + CH_PITCH) &&
+                      (x_d1 < VX + CH_PITCH + CH_W);
+    wire val_col2_c = (x_d1 >= VX + 2*CH_PITCH) &&
+                      (x_d1 < VX + 2*CH_PITCH + CH_W);
     wire        in_val_row_c = (y_d1 >= TY_VAL[11:0]) &&
                                (y_d1 < (TY_VAL + CH_H));
-    wire        bit_in_val_col_c = in_val_row_c && in_val_col_c &&
-                                   (val_coff_c < CH_W);
-    wire [3:0]  val_bitcol_c = val_coff_c[3:0];
+    wire        bit_in_val_col_c = in_val_row_c &&
+                                   (val_col0_c || val_col1_c || val_col2_c);
+    wire [3:0]  val_bitcol_c = val_col0_c ? (x_d1[3:0] - VX) :
+                               val_col1_c ? (x_d1[3:0] - (VX + CH_PITCH)) :
+                                            (x_d1[3:0] - (VX + 2*CH_PITCH));
     wire [11:0] val_yoff_c   = y_d1 - TY_VAL[11:0];
     wire [3:0]  txt_row_val_c = val_yoff_c[3:0];
 
@@ -359,19 +348,55 @@ reg [4:0] font_code_d2;
         end
     end
 
-    wire [7:0] val_code_c = (val_coff_c < CH_W) ?
-                            ((vl_off < 12'd20) ? (v_ge100_p ? (8'h30 + v_hund_p) : 8'h20) :
-                             (vl_off < 12'd40) ? (v_ge10_p  ? (8'h30 + v_ten_p)  : 8'h20)
-                                               : (8'h30 + v_one_p))
-                          : 8'h20;
+    wire [7:0] val_code_c = val_col0_c ?
+                            (v_ge100_p ? (8'h30 + v_hund_p) : 8'h20) :
+                            val_col1_c ?
+                            (v_ge10_p ? (8'h30 + v_ten_p) : 8'h20) :
+                            val_col2_c ? (8'h30 + v_one_p) : 8'h20;
 
-    wire [15:0] font_word;
+    always @(posedge I_clk or posedge I_rst) begin
+        if (I_rst) begin
+            de_d2 <= 1'b0; hs_d2 <= 1'b0; vs_d2 <= 1'b0;
+            in_fill_d2 <= 1'b0; in_ring_d2 <= 1'b0;
+            rect_bg_d2 <= 1'b0; rect_border_d2 <= 1'b0; rect_fill_d2 <= 1'b0;
+            rect_sel_d2 <= 1'b0; panel_d2 <= 1'b0;
+            rgb_d2 <= 24'd0;
+            font_code_d2 <= 0; font_row_d2 <= 4'd0;
+            bit_in_txt_d2 <= 1'b0; in_val_row_d2 <= 1'b0;
+            font_bitcol_d2 <= 4'd0;
+        end else begin
+            de_d2 <= de_d1; hs_d2 <= hs_d1; vs_d2 <= vs_d1;
+            in_fill_d2 <= in_fill; in_ring_d2 <= in_ring;
+            rect_bg_d2 <= in_rect;
+            rect_border_d2 <= rect_border; rect_fill_d2 <= rect_fill;
+            rect_sel_d2 <= bar_sel;
+            panel_d2 <= I_panel_en;
+            rgb_d2 <= rgb_d1;
+
+            font_code_d2 <= compact_glyph(in_name_row_c ? name_code_c : val_code_c);
+            font_row_d2   <= in_name_row_c ? txt_row_c   : txt_row_val_c;
+
+            bit_in_txt_d2 <= (in_name_row_c & bit_in_name_col_c) |
+                             (in_val_row_c  & bit_in_val_col_c);   // 两者互斥
+            in_val_row_d2 <= in_val_row_c;                   // 决定文字颜色
+            font_bitcol_d2<= in_name_row_c ? name_bitcol_c : val_bitcol_c;
+        end
+    end
+
+    wire font_pixel;
+    packed_osd_font_address #(.MONITOR(0)) font_address(
+        .glyph(font_code_d2),.row(font_row_d2),.col(font_bitcol_d2),.address(O_shared_font_addr));
+    generate if(SHARED_FONT)begin:shared_font
+        assign font_pixel=I_shared_font_pixel;
+    end else begin:local_font
     p4_compact_font u_font (
         .clk       (I_clk),
         .char_code (font_code_d2),          // D2 地址
-        .row       (font_row_d2),           // D2 地址
-        .rom_row   (font_word)              // D3 数据（地址后 1 拍）
+        .row       (font_row_d2),
+        .bitcol    (font_bitcol_d2),           // D2 地址
+        .rom_pixel (font_pixel)              // D3 数据（地址后 1 拍）
     );
+    end endgenerate
 
     reg        de_d3, hs_d3, vs_d3;
     reg        in_fill_d3, in_ring_d3, panel_d3;
@@ -403,8 +428,7 @@ reg [4:0] font_code_d2;
         end
     end
 
-    wire [3:0] font_bit_sel_d3 = 4'd15 - font_bitcol_d3;
-    wire       txt_pix_d3      = bit_in_txt_d3 & font_word[font_bit_sel_d3];
+    wire txt_pix_d3 = bit_in_txt_d3 & font_pixel;
 
     reg [23:0] comp;
     always @(*) begin

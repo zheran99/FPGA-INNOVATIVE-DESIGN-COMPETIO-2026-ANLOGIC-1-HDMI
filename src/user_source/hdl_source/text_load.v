@@ -107,6 +107,8 @@ always @(posedge clk or posedge rst) begin
             ln_acc  <= ln_nxt;
         end
 
+        if (state == S_SCAN && mcnt != 3'd4) gcnt <= 13'd4;
+
         case (state)
 
             S_IDLE: begin
@@ -129,7 +131,7 @@ always @(posedge clk or posedge rst) begin
                             default: begin                                     // 3
                                 if (I_sec_data == 8'h54) begin                 // 'T'
                                     mcnt <= 3'd4;
-                                    gcnt <= 13'd4; header_ok <= 0;
+                                    header_ok <= 0;
                                 end else mcnt <= 3'd0;
                             end
                         endcase

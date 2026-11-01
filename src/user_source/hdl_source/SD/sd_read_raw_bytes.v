@@ -34,7 +34,26 @@ module sd_read_raw_bytes #(
             default:command_byte=8'h50;
         endcase
     end
-    assign data=receive;
+
+    reg ack_q;
+    reg [7:0] received_byte;
+    reg received_zero,received_one,received_token,received_ff,received_msb;
+    always @(posedge clk or posedge rst)begin
+        if(rst)begin
+            ack_q<=0;received_byte<=8'hff;
+            received_zero<=0;received_one<=0;received_token<=0;
+            received_ff<=1;received_msb<=1;
+        end else begin
+            ack_q<=ack;
+            if(ack)begin
+                received_byte<=receive;
+                received_zero<=receive==8'h00;received_one<=receive==8'h01;
+                received_token<=receive==8'hfe;received_ff<=receive==8'hff;
+                received_msb<=receive[7];
+            end
+        end
+    end
+    assign data=received_byte;
     assign payload_active=state==PAYLOAD;
     assign idle=init_done && state==IDLE;
     assign cs_out=cs;
@@ -79,7 +98,7 @@ module sd_read_raw_bytes #(
                         default:transmit<=8'hff;
                     endcase
                 end
-            end else if(ack)begin
+            end else if(ack_q)begin
                 pending<=0;request<=0;
                 if((cancel || abort_pending) && init_done && state!=TAIL)begin
                     cs<=1;state<=TAIL;count<=0;
@@ -90,20 +109,20 @@ module sd_read_raw_bytes #(
                     COMMAND:if(count==5)begin state<=RESPONSE;count<=0;end
                             else count<=count+1'b1;
                     RESPONSE:begin
-                        if(receive==(init_done || init_step>=3 ? 8'd0 : 8'd1))begin
+                        if((init_done || init_step>=3) ? received_zero : received_one)begin
                             count<=0;
                             if(init_done)state<=TOKEN;
                             else if(init_step==1)state<=INIT_EXTRA;
                             else begin cs<=1;state<=TAIL;end
-                        end else if(!receive[7] || count==15)begin
+                        end else if(!received_msb || count==15)begin
                             failed<=1;cs<=1;state<=TAIL;
                         end else count<=count+1'b1;
                     end
                     INIT_EXTRA:if(count==3)begin cs<=1;state<=TAIL;end
                                else count<=count+1'b1;
                     TOKEN:begin
-                        if(receive==8'hfe)begin state<=PAYLOAD;count<=0;end
-                        else if(receive!=8'hff || count==TOKEN_BYTES-1)begin
+                        if(received_token)begin state<=PAYLOAD;count<=0;end
+                        else if(!received_ff || count==TOKEN_BYTES-1)begin
                             failed<=1;cs<=1;state<=TAIL;
                         end else count<=count+1'b1;
                     end
